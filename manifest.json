@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "简填 - 网申自动填充",
+  "version": "0.9.0",
+  "description": "多版本简历管理、双模式填充、AI 规则与跨 ATS 动态经历适配",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["https://api.deepseek.com/*"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "action": {"default_popup": "popup.html", "default_title": "简填"},
+  "options_page": "options.html",
+  "background": {"service_worker": "background.js"},
+  "content_scripts": [{"matches": ["https://*/*", "http://*/*"], "js": ["content.js"], "run_at": "document_idle", "all_frames": true, "match_about_blank": true}],
+  "icons": {"16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png"}
+}

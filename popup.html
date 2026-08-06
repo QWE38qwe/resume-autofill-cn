@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="popup">
+  <header class="popup-hero">
+    <div class="brand-mark">简</div>
+    <div><div class="brand">简填</div><div class="sub">让正确的简历，抵达正确的机会</div></div>
+    <span class="local-badge"><i></i>本地</span>
+  </header>
+  <main class="popup-main">
+    <section class="resume-panel">
+      <div class="section-label"><span>本次简历</span><small>选择用于当前页面的版本</small></div>
+      <select id="profile" aria-label="本次使用的简历版本"></select>
+      <div class="resume-meta" id="target"></div>
+    </section>
+
+    <section class="action-panel">
+      <button class="btn primary fill-main" id="fill"><span>一键填写</span><small>覆盖网页已有内容</small></button>
+      <button class="btn secondary fill-main" id="supplement"><span>补充填写</span><small>仅填写空白字段</small></button>
+      <div class="action-foot">
+        <span><i></i>不会自动保存或提交</span>
+        <button class="scan-link" id="scan">重新扫描</button>
+      </div>
+    </section>
+
+    <section class="card page-card">
+      <div class="page-line"><div><span class="overline">CURRENT PAGE</span><strong>当前页面</strong></div><span class="site-pill" id="site">识别中</span></div>
+      <div class="metric-grid">
+        <div class="mini-metric"><span>可填写字段</span><strong id="detected">—</strong></div>
+        <div class="mini-metric"><span>AI 字段匹配</span><span class="pill gray" id="apiStatus">未配置</span></div>
+      </div>
+    </section>
+
+    <section class="card result">
+      <div class="result-head"><div><span class="overline">LATEST RESULT</span><strong>最近一次填充</strong></div><span class="pill gray" id="resultSummary">暂无</span></div>
+      <div id="results"><div class="muted">完成填写后，这里会显示匹配详情。</div></div>
+    </section>
+  </main>
+  <footer class="footer"><button class="link" id="manage">资料与版本</button><span></span><button class="link" id="settings">设置</button><small id="buildVersion"></small></footer>
+  <script src="popup.js"></script>
+</body>
+</html>

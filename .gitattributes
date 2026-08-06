@@ -1,0 +1,4 @@
+vendor/** linguist-vendored
+*.bcmap binary
+*.pfb binary
+*.ttf binary

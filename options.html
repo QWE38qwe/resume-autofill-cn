@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>简填管理台</title>
+  <link rel="stylesheet" href="manager.css">
+</head>
+<body>
+  <div class="app-shell" id="appShell">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <div class="logo">
+          <span>简</span>
+          <div class="brand-copy"><b>简填</b><small>网申资料管理</small></div>
+        </div>
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="折叠侧栏" title="折叠侧栏">‹</button>
+      </div>
+      <nav id="nav" aria-label="主导航">
+        <button data-tab="home" class="active" title="概览"><span class="nav-icon">⌂</span><span class="nav-label">概览</span></button>
+        <button data-tab="profile" title="个人资料"><span class="nav-icon">人</span><span class="nav-label">个人资料</span></button>
+        <button data-tab="growth" title="教育背景"><span class="nav-icon">学</span><span class="nav-label">教育背景</span></button>
+        <button data-tab="versions" title="简历版本"><span class="nav-icon">版</span><span class="nav-label">简历版本</span></button>
+        <button data-tab="api" title="设置"><span class="nav-icon">设</span><span class="nav-label">设置</span></button>
+      </nav>
+      <div class="sidebar-foot"><span class="status-dot"></span><span class="nav-label">数据仅保存在本机</span></div>
+    </aside>
+    <main class="workspace">
+<section id="home" class="section active">
+  <div class="surface dashboard-surface">
+    <div class="surface-head">
+      <div><span class="section-kicker">申请动态</span><h2>网申记录</h2><p>按公司、日期和处理状态快速定位记录</p></div>
+      <div class="head-actions">
+        <button class="btn secondary" id="exportHistory">导出记录</button>
+        <button class="btn primary" id="addHistory">手动添加</button>
+      </div>
+    </div>
+    <div class="filter-bar">
+      <div class="field"><label for="companyFilter">公司</label><select id="companyFilter"><option value="">全部公司</option></select></div>
+      <div class="field"><label for="dateFrom">开始日期</label><input id="dateFrom" type="date"></div>
+      <div class="field"><label for="dateTo">结束日期</label><input id="dateTo" type="date"></div>
+      <div class="field"><label for="statusFilter">状态</label><select id="statusFilter"><option value="">全部状态</option><option>已完成</option><option>未完成</option></select></div>
+      <button class="btn ghost filter-reset" id="clearFilters">清空筛选</button>
+    </div>
+    <div class="result-summary" id="historySummary"></div>
+    <div class="table-wrap" id="dashboardHistory"></div>
+  </div>
+</section>
+<section id="profile" class="section">
+  <div class="surface">
+    <div class="surface-head"><div><h2>基本信息</h2><p>身份、地域和联系方式</p></div><button class="btn primary" id="saveBasic">保存</button></div>
+    <div id="basicForm" class="form-grid"></div>
+  </div>
+  <div class="surface">
+    <div class="surface-head"><div><h2>自定义字段</h2><p>补充标准资料之外的字段，并通过别名适配不同招聘网站</p></div><button class="btn secondary" id="addCustomField">添加自定义字段</button></div>
+    <div id="customFieldList"></div>
+  </div>
+  <div class="surface">
+    <div class="surface-head"><div><h2>家庭情况</h2><p>敏感字段，默认不参与自动填写</p></div><button class="btn secondary" data-add="family">添加成员</button></div>
+    <div id="familyList"></div>
+  </div>
+</section>
+<section id="growth" class="section">
+  <div class="anchor-nav" aria-label="教育背景页内导航">
+    <button data-scroll="educationBlock" class="active">教育经历</button>
+    <button data-scroll="languageBlock">语言与技能</button>
+    <button data-scroll="certificateBlock">证书与获奖</button>
+    <button data-scroll="projectBlock">项目经历</button>
+    <button data-scroll="paperBlock">论文期刊</button>
+    <button data-scroll="portfolioBlock">作品与兴趣</button>
+  </div>
+  <div id="educationBlock" class="anchor-block surface"><div class="surface-head"><div><span class="section-kicker">01</span><h2>教育经历</h2></div><button class="btn secondary" data-add="education">添加教育经历</button></div><div id="educationList"></div></div>
+  <div id="languageBlock" class="anchor-block"><div class="two-col"><div class="surface"><div class="surface-head"><div><span class="section-kicker">02</span><h2>外语能力</h2></div><button class="btn secondary" data-add="languages">添加</button></div><div id="languagesList"></div></div><div class="surface"><div class="surface-head"><div><span class="section-kicker">03</span><h2>计算机及专业技能</h2></div><button class="btn secondary" data-add="skills">添加</button></div><div id="skillsList"></div></div></div></div>
+  <div id="certificateBlock" class="anchor-block"><div class="two-col"><div class="surface"><div class="surface-head"><div><span class="section-kicker">04</span><h2>资格证书</h2></div><button class="btn secondary" data-add="certificates">添加</button></div><div id="certificatesList"></div></div><div class="surface"><div class="surface-head"><div><span class="section-kicker">05</span><h2>获奖情况</h2></div><button class="btn secondary" data-add="awards">添加</button></div><div id="awardsList"></div></div></div></div>
+  <div id="projectBlock" class="anchor-block surface"><div class="surface-head"><div><span class="section-kicker">06</span><h2>项目经历</h2></div><button class="btn secondary" data-add="projects">添加项目</button></div><div id="projectsList"></div></div>
+  <div id="paperBlock" class="anchor-block surface"><div class="surface-head"><div><span class="section-kicker">07</span><h2>论文期刊</h2></div><button class="btn secondary" data-add="papers">添加论文</button></div><div id="papersList"></div></div>
+  <div id="portfolioBlock" class="anchor-block"><div class="two-col"><div class="surface"><div class="surface-head"><div><span class="section-kicker">08</span><h2>作品集</h2></div><button class="btn secondary" data-add="portfolio">添加作品</button></div><div id="portfolioList"></div></div><div class="surface"><div class="surface-head"><div><span class="section-kicker">09</span><h2>兴趣爱好</h2></div><button class="btn primary" id="saveHobbies">保存</button></div><textarea id="hobbiesText" rows="5" placeholder="例如：素描速写、阅读"></textarea></div></div></div>
+</section>
+<section id="versions" class="section">
+  <div class="surface">
+    <div class="surface-head">
+      <div><span class="section-kicker">版本库</span><h2>简历版本</h2><p>新建空白版本，或从现有简历完整提取实习经历</p></div>
+      <div class="head-actions"><button class="btn secondary" id="showImport">导入简历新建</button><button class="btn primary" id="addVersion">新建空白版本</button></div>
+    </div>
+    <div id="versionList"></div>
+    <div id="versionEditor"></div>
+  </div>
+  <div class="surface import-panel hidden" id="importPanel">
+    <div class="surface-head">
+      <div><span class="section-kicker">导入新版本</span><h2>解析实习经历</h2><p>完整保留业务背景、职责和成果原文，不总结、不合并。</p></div>
+      <button class="icon-btn" id="closeImport" type="button" aria-label="关闭导入面板">×</button>
+    </div>
+    <div class="upload-box">
+      <label class="file-drop" for="resumeFile"><span class="upload-icon">↑</span><strong id="fileName">选择 PDF、DOCX、TXT 或 Markdown 简历</strong><small>文件只在本机读取，文本将发送到你配置的 AI 服务解析</small></label>
+      <input id="resumeFile" type="file" accept=".pdf,.docx,.md,.txt">
+      <button class="btn primary" id="parseResume">读取并解析</button>
+    </div>
+    <div class="parse-status" id="parseStatus" aria-live="polite"></div>
+    <div id="parseResult"></div>
+  </div>
+</section>
+<section id="api" class="section">
+  <div class="surface settings-card">
+    <div class="surface-head"><div><span class="section-kicker">模型服务</span><h2>AI 解析与匹配</h2><p>用于简历实习经历结构化解析和招聘网页字段匹配，配置仅保存在本机。</p></div></div>
+    <div class="form-grid">
+      <div class="field full-span"><label for="apiBase">DeepSeek 兼容 API 地址</label><input id="apiBase" placeholder="https://api.deepseek.com"></div>
+      <div class="field"><label for="model">模型名称</label><input id="model" placeholder="deepseek-chat"></div>
+      <div class="field"><label for="apiKey">API Key</label><input id="apiKey" type="password" autocomplete="off" placeholder="sk-..."></div>
+    </div>
+    <div class="settings-actions"><span class="muted">解析时会申请对应 API 域名的访问权限</span><button class="btn primary" id="saveSettings">保存设置</button></div>
+  </div>
+  <div class="surface settings-card">
+    <div class="surface-head">
+      <div>
+        <span class="section-kicker">回答策略</span>
+        <h2>AI 自动回答规则</h2>
+        <p>只使用你明确配置的事实与偏好；AI 仅识别网页问题，不推测答案。</p>
+      </div>
+      <button class="btn secondary" id="addAiRule">添加规则</button>
+    </div>
+    <div class="rule-principles">
+      <span>固定答案不发送给模型</span>
+      <span>低置信度不自动填写</span>
+      <span>不会自动勾选协议</span>
+    </div>
+    <div id="aiRuleList"></div>
+  </div>
+</section>
+    </main>
+  </div>
+  <div id="modal" class="modal" role="dialog" aria-modal="true"><div class="modal-box"><div id="modalBody"></div></div></div>
+  <script src="vendor/fflate.min.js"></script>
+  <script src="manager.js"></script>
+</body>
+</html>
