@@ -8,7 +8,7 @@ while IFS= read -r file; do
   files+=("$file")
 done < <(find . -maxdepth 2 -type f \
   \( -name '*.js' -o -name '*.html' -o -name '*.css' -o -name '*.md' -o -name '*.json' \) \
-  ! -path './vendor/*' ! -path './.git/*' ! -path './scripts/*' -print)
+  ! -path './vendor/*' ! -path './.git/*' -print)
 
 if ((${#files[@]} == 0)); then
   echo "No source files found."
