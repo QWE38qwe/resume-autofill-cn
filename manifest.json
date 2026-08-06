@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "简填 - 网申自动填充",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "多版本简历管理、双模式填充、AI 规则与跨 ATS 动态经历适配",
   "homepage_url": "https://github.com/QWE38qwe/resume-autofill-cn",
   "permissions": ["storage", "activeTab", "scripting"],

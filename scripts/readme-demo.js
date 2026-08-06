@@ -116,7 +116,7 @@
   globalThis.chrome = {
     runtime: {
       id: "",
-      getManifest: () => ({ version: "0.9.0" }),
+      getManifest: () => ({ version: "0.9.1" }),
       getURL: path => new URL(`../${path}`, location.href).href,
       sendMessage: async () => ({})
     },

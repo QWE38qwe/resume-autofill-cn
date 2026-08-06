@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>JD repeat-section fixture</title>
+  <style>
+    body { font: 16px sans-serif; }
+    section { margin: 24px; padding: 16px; border: 1px solid #ccc; }
+    .record { margin: 12px 0; padding: 12px; border: 1px solid #ddd; }
+    label { display: block; margin: 8px 0; }
+  </style>
+</head>
+<body>
+  <nav aria-label="简历导航">
+    <a href="#education">教育经历</a>
+    <a href="#work">实习经历</a>
+    <a href="#project">项目经历</a>
+  </nav>
+
+  <main>
+    <section id="education">
+      <h2>教育经历</h2>
+      <button type="button" data-add="education">添加</button>
+      <div class="records">
+        <div class="record education-record">
+          <label>学校名称<input placeholder="请输入学校名称"></label>
+          <label>专业名称<input placeholder="请输入专业名称"></label>
+          <label>学历<input placeholder="请选择学历"></label>
+          <label>开始时间<input type="month"></label>
+          <label>结束时间<input type="month"></label>
+        </div>
+        <div class="record education-record">
+          <label>学校名称<input placeholder="请输入学校名称"></label>
+          <label>专业名称<input placeholder="请输入专业名称"></label>
+          <label>学历<input placeholder="请选择学历"></label>
+          <label>开始时间<input type="month"></label>
+          <label>结束时间<input type="month"></label>
+        </div>
+      </div>
+    </section>
+
+    <section id="work">
+      <h2>实习经历</h2>
+      <button type="button" data-add="work">添加</button>
+      <div class="records">
+        <div class="record work-record">
+          <label>起止时间<input type="month"><input type="month"></label>
+          <label>公司名称<input placeholder="请输入公司名称"></label>
+          <label>职位名称<input placeholder="请输入职位名称"></label>
+          <label>工作描述<textarea placeholder="请输入工作描述"></textarea></label>
+        </div>
+        <div class="record work-record">
+          <label>起止时间<input type="month"><input type="month"></label>
+          <label>公司名称<input placeholder="请输入公司名称"></label>
+          <label>职位名称<input placeholder="请输入职位名称"></label>
+          <label>工作描述<textarea placeholder="请输入工作描述"></textarea></label>
+        </div>
+      </div>
+    </section>
+
+    <section id="project">
+      <h2>项目经历</h2>
+      <button type="button" data-add="project">添加</button>
+      <div class="record project-record">
+        <label>项目名称<input placeholder="请输入项目名称"></label>
+        <label>职责<textarea placeholder="请输入项目职责"></textarea></label>
+        <label>项目内容<textarea placeholder="请输入项目内容"></textarea></label>
+      </div>
+    </section>
+  </main>
+
+  <button type="button" id="run-fixture">运行夹具</button>
+  <pre id="result">not-run</pre>
+
+  <script>
+    const fixtureStore = {
+      personal: {},
+      education: [
+        {
+          school: "示例研究院",
+          major: "信息管理",
+          level: "硕士",
+          start: "2024-09",
+          end: "2027-06"
+        },
+        {
+          school: "示例大学",
+          major: "软件工程",
+          level: "本科",
+          start: "2020-09",
+          end: "2024-06"
+        }
+      ],
+      profiles: [{
+        id: "fixture-profile",
+        name: "测试简历",
+        work: [
+          {
+            company: "甲公司",
+            position: "产品实习生",
+            start: "2025-06",
+            end: "2025-09",
+            description: "第一段实习的唯一正确描述"
+          },
+          {
+            company: "乙公司",
+            position: "数据实习生",
+            start: "2025-10",
+            end: "2026-02",
+            description: "第二段实习的唯一正确描述"
+          }
+        ]
+      }],
+      activeProfileId: "fixture-profile",
+      projects: [],
+      languages: [],
+      skills: [],
+      awards: [],
+      papers: [],
+      certificates: [],
+      portfolio: [],
+      customFields: [],
+      settings: {}
+    };
+
+    let contentListener;
+    window.chrome = {
+      storage: {
+        local: {
+          get: async keys => Object.fromEntries(keys.map(key => [key, fixtureStore[key]]))
+        }
+      },
+      runtime: {
+        sendMessage: async () => ({ matches: [], source: "disabled" }),
+        onMessage: {
+          addListener: listener => {
+            contentListener = listener;
+          }
+        }
+      }
+    };
+
+    document.querySelectorAll("[data-add]").forEach(button => {
+      button.addEventListener("click", () => {
+        button.dataset.clicks = String(Number(button.dataset.clicks || 0) + 1);
+        const records = button.parentElement.querySelector(".records");
+        records?.append(records.lastElementChild.cloneNode(true));
+      });
+    });
+
+    window.runJdFixture = () => new Promise((resolve, reject) => {
+      if (!contentListener) {
+        reject(new Error("content listener not registered"));
+        return;
+      }
+      contentListener({ type: "FILL_FORM", mode: "full" }, {}, response => {
+        const result = {
+          response,
+          educationCount: document.querySelectorAll(".education-record").length,
+          educationAddClicks: Number(document.querySelector("[data-add=education]").dataset.clicks || 0),
+          workCount: document.querySelectorAll(".work-record").length,
+          workDescriptions: [...document.querySelectorAll(".work-record textarea")].map(item => item.value),
+          projectDescriptions: [...document.querySelectorAll(".project-record textarea")].map(item => item.value)
+        };
+        result.pass = result.educationCount === 2 &&
+          result.educationAddClicks === 0 &&
+          result.workCount === 2 &&
+          result.workDescriptions[0] === "第一段实习的唯一正确描述" &&
+          result.workDescriptions[1] === "第二段实习的唯一正确描述" &&
+          result.projectDescriptions.every(value => value === "");
+        document.querySelector("#result").textContent = JSON.stringify(result, null, 2);
+        resolve(result);
+      });
+    });
+
+    document.querySelector("#run-fixture").addEventListener("click", async () => {
+      try {
+        await window.runJdFixture();
+      } catch (error) {
+        document.querySelector("#result").textContent = JSON.stringify({
+          error: error.message
+        });
+      }
+    });
+  </script>
+  <script src="../content.js"></script>
+</body>
+</html>

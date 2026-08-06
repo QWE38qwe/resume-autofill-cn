@@ -1213,12 +1213,21 @@ async function fillControl(element, value, overwrite = false) {
   return setNativeValue(element, value) ? "filled" : "failed";
 }
 
-function findSection(titles) {
+function sectionFieldScore(node, definition) {
+  if (!definition) return 0;
+  const text = normalizeText(node.innerText || node.textContent);
+  return Object.values(definition.fields).filter(aliases =>
+    aliases.some(alias => text.includes(normalizeText(alias)))
+  ).length;
+}
+
+function findSection(titles, definition) {
   const titleSet = titles.map(normalizeText);
   const headings = queryAllDeep(document, "h1,h2,h3,h4,h5,h6,legend,div,span,p,li")
     .filter(element => {
       if (!isVisible(element) || element.children.length > 5) return false;
-      const text = normalizeText(element.textContent);
+      if (element.closest("nav,aside,[role=navigation]")) return false;
+      const text = normalizeText(directText(element) || shortText(element));
       return titleSet.some(title => text === title || text.startsWith(title));
     });
   const candidates = [];
@@ -1228,9 +1237,14 @@ function findSection(titles) {
       node = node.parentElement;
       const count = controls(node).length;
       if (count < 2 || count > 100) continue;
+      const fieldScore = sectionFieldScore(node, definition);
+      if (definition && fieldScore < 2) continue;
       const add = findAddButton(node);
-      candidates.push({ node, score: depth * 8 + count - (add ? 35 : 0) });
-      if (add) break;
+      candidates.push({
+        node,
+        score: depth * 12 + count * 1.5 - fieldScore * 12 - (add ? 6 : 0)
+      });
+      if (add && fieldScore >= 3) break;
     }
   });
   candidates.sort((left, right) => left.score - right.score);
@@ -1363,7 +1377,7 @@ function dateLayoutControls(block) {
   return controls(block).filter(control => {
     if (!(control instanceof HTMLInputElement)) return false;
     if (control.type === "checkbox" || control.type === "radio" || control.type === "file") return false;
-    const text = normalizeText(`${control.type || ""} ${control.placeholder || ""} ${labelOf(control)} ${nearbyTextOf(control, block)} ${control.className || ""}`);
+    const text = normalizeText(`${control.type || ""} ${control.placeholder || ""} ${labelOf(control)} ${control.className || ""}`);
     return /请选择|日期|时间|年月|date|month|calendar|picker/.test(text) || control.readOnly;
   });
 }
@@ -1372,6 +1386,7 @@ async function fillWorkByLayout(block, record, overwrite, used) {
   let filled = 0;
   const notes = [];
   const diagnostics = [];
+  const handledKeys = new Set();
   const blockControls = controls(block);
   const startAliases = ["开始时间", "起始时间", "开始日期", "起止时间", "start date", "from"];
   const endAliases = ["结束时间", "结束日期", "end date", "to"];
@@ -1411,14 +1426,17 @@ async function fillWorkByLayout(block, record, overwrite, used) {
 
   const textarea = findControlNearLabel(block, REPEAT_DEFS.find(item => item.type === "work").fields.description, "description", new Set()) ||
     textareas[0];
-  if (textarea && description && (overwrite || isBlankControl(textarea))) {
-    forceNativeValue(textarea, description);
+  if (textarea && description) {
+    handledKeys.add("description");
     used.add(textarea);
-    filled += 1;
-    notes.push("实习内容");
+    if (overwrite || isBlankControl(textarea)) {
+      forceNativeValue(textarea, description);
+      filled += 1;
+      notes.push("实习内容");
+    }
   }
 
-  return { filled, failed: partsResult.failed, notes, diagnostics };
+  return { filled, failed: partsResult.failed, handledKeys, notes, diagnostics };
 }
 
 function recordContainer(anchor, root, anchorControls, definition) {
@@ -1641,6 +1659,7 @@ async function fillRecord(block, definition, record, overwrite) {
   }
   let failed = layout.failed || 0;
   for (const [key, aliases] of Object.entries(definition.fields)) {
+    if (layout.handledKeys?.has(key)) continue;
     const value = record[key];
     if (value == null || String(value).trim() === "") continue;
     const control = findControlByAliases(block, aliases, used, key) ||
@@ -1659,12 +1678,12 @@ async function fillRecord(block, definition, record, overwrite) {
 }
 
 function sectionForDefinition(definition) {
-  if (definition.type !== "work") return findSection(definition.titles);
-  return findSection(["实习经历", "实习经验"]) ||
-    findSection(["工作经历", "工作经验", "任职经历"]) ||
+  if (definition.type !== "work") return findSection(definition.titles, definition);
+  return findSection(["实习经历", "实习经验"], definition) ||
+    findSection(["工作经历", "工作经验", "任职经历"], definition) ||
     workInfoSection() ||
-    findSection(["work experience", "employment history", "experience"]) ||
-    findSection(definition.titles);
+    findSection(["work experience", "employment history", "experience"], definition) ||
+    findSection(definition.titles, definition);
 }
 
 async function fillRepeatedSections(store, profile, overwrite) {

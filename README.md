@@ -81,6 +81,7 @@
 - Ant Design、Element、iView、Phoenix 和 `sd-Select`。
 - iframe、开放 Shadow DOM、动态追加记录。
 - “工作信息 N”等非标准重复经历布局。
+- 京东校招重复经历：区分侧栏导航和真实表单区域，避免重复追加教育记录及跨区域写入实习内容。
 
 招聘网站会持续更新 DOM。遇到问题时，请提交不含个人值的页面结构、字段名称、控件类型和复现步骤。
 
@@ -94,6 +95,13 @@ node --check content.js
 node --check manager.js
 node --check popup.js
 bash scripts/privacy-check.sh
+```
+
+京东重复经历夹具可通过本地静态服务器打开：
+
+```bash
+python3 -m http.server 8877
+# 浏览器访问 http://127.0.0.1:8877/tests/jd-fixture.html
 ```
 
 ## 安全
