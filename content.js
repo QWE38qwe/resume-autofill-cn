@@ -264,7 +264,7 @@ function controls(root = document) {
 }
 
 function customSelectControls(root = document, baseControls = controls(root)) {
-  return queryAllDeep(root, ".phoenix-select")
+  return queryAllDeep(root, ".phoenix-select,.ant-select")
     .filter(element => {
       if (!isVisible(element) || element.getAttribute("aria-disabled") === "true") return false;
       return !baseControls.some(control => element.contains(control));
@@ -915,6 +915,78 @@ async function choosePhoenixMonth(element, value) {
   return Boolean(selectedValue && !/请选择|请输入|选择/.test(selectedValue));
 }
 
+async function chooseAntDate(element, value) {
+  const picker = element.closest?.(".ant-calendar-picker");
+  if (!picker) return false;
+  const match = String(value || "").match(/(\d{4})\D{0,3}(\d{1,2})\D{0,3}(\d{1,2})/);
+  if (!match) return false;
+  const targetYear = Number(match[1]);
+  const targetMonth = Number(match[2]);
+  const targetDay = Number(match[3]);
+
+  clickElement(picker);
+  await sleep(220);
+  let calendar = visibleOne(".ant-calendar");
+  if (!calendar) return false;
+
+  const yearSwitch = calendar.querySelector(".ant-calendar-year-select");
+  if (yearSwitch) {
+    clickElement(yearSwitch);
+    await sleep(140);
+    let yearPanel = visibleOne(".ant-calendar-year-panel");
+    for (let attempt = 0; yearPanel && attempt < 12; attempt += 1) {
+      const years = [...yearPanel.querySelectorAll(".ant-calendar-year-panel-year")]
+        .map(node => Number(normalizeText(node.textContent)))
+        .filter(Boolean);
+      if (years.length && targetYear < Math.min(...years)) {
+        clickElement(yearPanel.querySelector(".ant-calendar-year-panel-prev-decade-btn"));
+        await sleep(100);
+      } else if (years.length && targetYear > Math.max(...years)) {
+        clickElement(yearPanel.querySelector(".ant-calendar-year-panel-next-decade-btn"));
+        await sleep(100);
+      } else {
+        break;
+      }
+      yearPanel = visibleOne(".ant-calendar-year-panel");
+    }
+    const yearCell = [...(yearPanel?.querySelectorAll(".ant-calendar-year-panel-cell") || [])]
+      .find(cell =>
+        normalizeText(cell.querySelector(".ant-calendar-year-panel-year")?.textContent) === String(targetYear) &&
+        !cell.classList.contains("ant-calendar-year-panel-cell-disabled")
+      );
+    if (!yearCell) return false;
+    clickElement(yearCell);
+    await sleep(140);
+  }
+
+  calendar = visibleOne(".ant-calendar");
+  const monthSwitch = calendar?.querySelector(".ant-calendar-month-select");
+  if (monthSwitch) {
+    clickElement(monthSwitch);
+    await sleep(140);
+    const monthPanel = visibleOne(".ant-calendar-month-panel");
+    const monthCells = [...(monthPanel?.querySelectorAll(".ant-calendar-month-panel-cell") || [])]
+      .filter(cell => !cell.classList.contains("ant-calendar-month-panel-cell-disabled"));
+    const monthCell = monthCells[targetMonth - 1];
+    if (!monthCell) return false;
+    clickElement(monthCell);
+    await sleep(140);
+  }
+
+  calendar = visibleOne(".ant-calendar");
+  const dayCell = [...(calendar?.querySelectorAll(".ant-calendar-cell") || [])]
+    .find(cell =>
+      normalizeText(cell.querySelector(".ant-calendar-date")?.textContent) === String(targetDay) &&
+      !cell.classList.contains("ant-calendar-last-month-cell") &&
+      !cell.classList.contains("ant-calendar-next-month-btn-day") &&
+      !cell.classList.contains("ant-calendar-disabled-cell")
+    );
+  if (!dayCell) return false;
+  clickElement(dayCell);
+  await sleep(180);
+  return Boolean(String(element.value || "").trim());
+}
+
 function selectWrapperFor(element) {
   const libraryWrapper = element.closest(".phoenix-select,.ant-select,.el-select,.ivu-select,[role=combobox]");
   if (libraryWrapper) return libraryWrapper;
@@ -1187,6 +1259,7 @@ async function fillDateLikeControl(element, value) {
     !/date|month/.test(element.type || "")) return false;
   if (!/^\d{4}-\d{1,2}/.test(formatted)) return false;
   if (await choosePhoenixMonth(element, value)) return true;
+  if (await chooseAntDate(element, value)) return true;
   forceNativeValue(element, formatted);
   await sleep(100);
   return true;
@@ -1201,6 +1274,7 @@ function controlCurrentValue(element) {
     ".phoenix-select-selection-selected-value",
     ".phoenix-select-selection__rendered",
     ".phoenix-select-selection__choice__content",
+    ".ant-select-selection-selected-value",
     "[class*='Input-display-value']",
     ".ant-select-selection-item",
     ".el-select__selected-item",
@@ -1209,7 +1283,7 @@ function controlCurrentValue(element) {
     "[class*='SelectedValue']"
   ].join(","));
   const displayValue = String(display?.innerText || display?.textContent || "").trim();
-  if (displayValue || /sd-Select|phoenix-select/.test(String(wrapper?.className || ""))) return displayValue;
+  if (displayValue || /sd-Select|phoenix-select|ant-select/.test(String(wrapper?.className || ""))) return displayValue;
   return String(element.value ?? element.textContent ?? "").trim();
 }
 
@@ -1818,6 +1892,7 @@ function flattened(personal, education, profile, skills = [], languages = []) {
   const graduationDate = firstEducation.end || personal.graduationDate || "";
   return {
     ...personal,
+    identityType: personal.identityType || (personal.identityNumber ? "居民身份证" : ""),
     city: personal.city || personal.currentCity,
     country: personal.country || personal.nationality,
     expectedRole: personal.expectedRole || profile?.target || "",
@@ -1882,7 +1957,7 @@ async function fillBaseFields(data, customFields, settings, handled, targets, ai
     handled.add(element);
     const value = mappedValue(match.key, data, customFields, settings);
     if (!hasMappedValue(value)) {
-      items.push({ label: `${match.label}：资料库暂无值`, state: "yellow", status: "未匹配" });
+      items.push({ label: `${match.label}：字段已识别，资料库暂无值`, state: "yellow", status: "资料缺失" });
       continue;
     }
     const result = await fillControl(element, value, Boolean(settings.overwrite));

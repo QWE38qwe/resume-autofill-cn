@@ -5,72 +5,115 @@
   <title>Hotjob basic information fixture</title>
   <style>
     body { margin: 24px; font: 16px sans-serif; }
-    .form-wrap { display: grid; grid-template-columns: 160px 420px; align-items: center; margin: 14px 0; }
-    .form-tit { font-weight: 600; }
-    input, .phoenix-select { box-sizing: border-box; min-height: 40px; padding: 9px 12px; border: 1px solid #bbb; }
-    .phoenix-select { cursor: pointer; }
-    .phoenix-select-dropdown { position: absolute; z-index: 10; width: 420px; background: white; border: 1px solid #999; }
-    .phoenix-select-dropdown[hidden] { display: none; }
-    .phoenix-select-dropdown li { padding: 8px 12px; cursor: pointer; }
+    .ant-form-item { width: 620px; margin: 18px 0; }
+    .ant-form-item-label { margin-bottom: 7px; font-weight: 600; }
+    .ant-input, .ant-select { box-sizing: border-box; width: 100%; min-height: 40px; padding: 9px 12px; border: 1px solid #bbb; }
+    .ant-select, .ant-calendar-picker { cursor: pointer; }
+    .ant-select-dropdown, .ant-calendar { position: absolute; z-index: 10; width: 420px; background: white; border: 1px solid #999; padding: 8px; }
+    [hidden] { display: none !important; }
+    .ant-select-dropdown-menu-item, .ant-calendar-cell, .ant-calendar-month-panel-cell, .ant-calendar-year-panel-cell { padding: 8px 12px; cursor: pointer; }
+    .ant-calendar-cell, .ant-calendar-month-panel-cell, .ant-calendar-year-panel-cell { display: inline-block; }
   </style>
 </head>
 <body>
   <main id="basic-form">
-    <div class="form-wrap">
-      <div class="form-tit">出生日期</div>
-      <div class="form-main"><input id="birthDate" type="date"></div>
+    <div class="ant-form-item">
+      <div class="ant-form-item-label"><label>出生日期*</label></div>
+      <div class="ant-form-item-control"><span class="ant-calendar-picker"><input class="ant-input ant-calendar-picker-input" id="birthDate" placeholder="请选择出生日期" readonly></span></div>
     </div>
-    <div class="form-wrap">
-      <div class="form-tit">政治面貌</div>
-      <div class="form-main"><div class="phoenix-select" data-target="politics"><span class="phoenix-select-selection-selected-value">请选择</span></div></div>
+    <div class="ant-form-item">
+      <div class="ant-form-item-label"><label>政治面貌*</label></div>
+      <div class="ant-form-item-control"><div class="ant-select" data-target="politics"><span class="ant-select-selection__placeholder">请选择政治面貌</span><span class="ant-select-selection-selected-value"></span></div></div>
     </div>
-    <div class="form-wrap">
-      <div class="form-tit">证件类型</div>
-      <div class="form-main"><div class="phoenix-select" data-target="identityType"><span class="phoenix-select-selection-selected-value">请选择</span></div></div>
+    <div class="ant-form-item">
+      <div class="ant-form-item-label"><label>证件类型*</label></div>
+      <div class="ant-form-item-control"><div class="ant-select" data-target="identityType"><span class="ant-select-selection__placeholder">请选择证件类型</span><span class="ant-select-selection-selected-value"></span></div></div>
     </div>
-    <div class="form-wrap">
-      <div class="form-tit">证件号码</div>
-      <div class="form-main"><input id="identityNumber"></div>
+    <div class="ant-form-item">
+      <div class="ant-form-item-label"><label>证件号码*</label></div>
+      <div class="ant-form-item-control"><input class="ant-input" id="identityNumber" placeholder="请填写证件号码"></div>
     </div>
-    <div class="form-wrap">
-      <div class="form-tit">民族</div>
-      <div class="form-main"><div class="phoenix-select" data-target="ethnicity"><span class="phoenix-select-selection-selected-value">请选择</span></div></div>
+    <div class="ant-form-item">
+      <div class="ant-form-item-label"><label>民族*</label></div>
+      <div class="ant-form-item-control"><div class="ant-select" data-target="ethnicity"><span class="ant-select-selection__placeholder">请选择民族</span><span class="ant-select-selection-selected-value"></span></div></div>
     </div>
-    <div class="form-wrap">
-      <div class="form-tit">婚姻状况</div>
-      <div class="form-main"><div class="phoenix-select" data-target="maritalStatus"><span class="phoenix-select-selection-selected-value">请选择</span></div></div>
+    <div class="ant-form-item">
+      <div class="ant-form-item-label"><label>婚姻状况*</label></div>
+      <div class="ant-form-item-control"><div class="ant-select" data-target="maritalStatus"><span class="ant-select-selection__placeholder">请选择婚姻状况</span><span class="ant-select-selection-selected-value"></span></div></div>
     </div>
   </main>
 
-  <div class="phoenix-select-dropdown" data-menu="politics" hidden><ul><li>中共党员</li><li>群众</li></ul></div>
-  <div class="phoenix-select-dropdown" data-menu="identityType" hidden><ul><li>居民身份证</li><li>护照</li></ul></div>
-  <div class="phoenix-select-dropdown" data-menu="ethnicity" hidden><ul><li>汉族</li><li>满族</li></ul></div>
-  <div class="phoenix-select-dropdown" data-menu="maritalStatus" hidden><ul><li>未婚</li><li>已婚</li></ul></div>
+  <div class="ant-select-dropdown" data-menu="politics" hidden><ul><li class="ant-select-dropdown-menu-item">中共党员</li><li class="ant-select-dropdown-menu-item">群众</li></ul></div>
+  <div class="ant-select-dropdown" data-menu="identityType" hidden><ul><li class="ant-select-dropdown-menu-item">居民身份证</li><li class="ant-select-dropdown-menu-item">护照</li></ul></div>
+  <div class="ant-select-dropdown" data-menu="ethnicity" hidden><ul><li class="ant-select-dropdown-menu-item">汉族</li><li class="ant-select-dropdown-menu-item">满族</li></ul></div>
+  <div class="ant-select-dropdown" data-menu="maritalStatus" hidden><ul><li class="ant-select-dropdown-menu-item">未婚</li><li class="ant-select-dropdown-menu-item">已婚</li></ul></div>
+  <div class="ant-calendar" hidden>
+    <button class="ant-calendar-year-select" type="button">2026年</button>
+    <button class="ant-calendar-month-select" type="button">8月</button>
+    <div class="ant-calendar-year-panel" hidden>
+      <button class="ant-calendar-year-panel-prev-decade-btn" type="button">prev</button>
+      <span class="ant-calendar-year-panel-cell"><span class="ant-calendar-year-panel-year">1999</span></span>
+      <button class="ant-calendar-year-panel-next-decade-btn" type="button">next</button>
+    </div>
+    <div class="ant-calendar-month-panel" hidden>
+      <span class="ant-calendar-month-panel-cell">1月</span><span class="ant-calendar-month-panel-cell">2月</span>
+      <span class="ant-calendar-month-panel-cell">3月</span><span class="ant-calendar-month-panel-cell">4月</span>
+      <span class="ant-calendar-month-panel-cell">5月</span><span class="ant-calendar-month-panel-cell">6月</span>
+      <span class="ant-calendar-month-panel-cell">7月</span><span class="ant-calendar-month-panel-cell">8月</span>
+      <span class="ant-calendar-month-panel-cell">9月</span><span class="ant-calendar-month-panel-cell">10月</span>
+      <span class="ant-calendar-month-panel-cell">11月</span><span class="ant-calendar-month-panel-cell">12月</span>
+    </div>
+    <div class="ant-calendar-date-panel">
+      <span class="ant-calendar-cell"><span class="ant-calendar-date">3</span></span>
+    </div>
+  </div>
 
   <button type="button" id="run-fixture">运行夹具</button>
   <pre id="result">not-run</pre>
 
   <script>
-    document.querySelectorAll(".phoenix-select").forEach(select => {
+    document.querySelectorAll(".ant-select").forEach(select => {
       const menu = document.querySelector(`[data-menu="${select.dataset.target}"]`);
       select.addEventListener("click", () => {
-        document.querySelectorAll(".phoenix-select-dropdown").forEach(item => {
+        document.querySelectorAll(".ant-select-dropdown").forEach(item => {
           item.hidden = item !== menu;
         });
       });
       menu.querySelectorAll("li").forEach(option => {
         option.addEventListener("click", () => {
-          select.querySelector(".phoenix-select-selection-selected-value").textContent = option.textContent;
+          select.querySelector(".ant-select-selection-selected-value").textContent = option.textContent;
+          select.querySelector(".ant-select-selection__placeholder").hidden = true;
           menu.hidden = true;
         });
       });
+    });
+    const calendar = document.querySelector(".ant-calendar");
+    document.querySelector(".ant-calendar-picker").addEventListener("click", () => {
+      calendar.hidden = false;
+    });
+    calendar.querySelector(".ant-calendar-year-select").addEventListener("click", () => {
+      calendar.querySelector(".ant-calendar-year-panel").hidden = false;
+    });
+    calendar.querySelector(".ant-calendar-year-panel-cell").addEventListener("click", () => {
+      calendar.querySelector(".ant-calendar-year-panel").hidden = true;
+    });
+    calendar.querySelector(".ant-calendar-month-select").addEventListener("click", () => {
+      calendar.querySelector(".ant-calendar-month-panel").hidden = false;
+    });
+    calendar.querySelectorAll(".ant-calendar-month-panel-cell").forEach(cell => {
+      cell.addEventListener("click", () => {
+        calendar.querySelector(".ant-calendar-month-panel").hidden = true;
+      });
+    });
+    calendar.querySelector(".ant-calendar-cell").addEventListener("click", () => {
+      document.querySelector("#birthDate").value = "1999-02-03";
+      calendar.hidden = true;
     });
 
     const fixtureStore = {
       personal: {
         birthDate: "1999-02-03",
         politics: "中共党员",
-        identityType: "居民身份证",
         identityNumber: "110101199902030011",
         ethnicity: "汉族",
         maritalStatus: "未婚"
@@ -107,11 +150,11 @@
       const output = await window.__jianfillTest.fillCurrentFrame("full");
       const values = {
         birthDate: document.querySelector("#birthDate").value,
-        politics: document.querySelector('[data-target="politics"] span').textContent,
-        identityType: document.querySelector('[data-target="identityType"] span').textContent,
+        politics: document.querySelector('[data-target="politics"] .ant-select-selection-selected-value').textContent,
+        identityType: document.querySelector('[data-target="identityType"] .ant-select-selection-selected-value').textContent,
         identityNumber: document.querySelector("#identityNumber").value,
-        ethnicity: document.querySelector('[data-target="ethnicity"] span').textContent,
-        maritalStatus: document.querySelector('[data-target="maritalStatus"] span').textContent
+        ethnicity: document.querySelector('[data-target="ethnicity"] .ant-select-selection-selected-value').textContent,
+        maritalStatus: document.querySelector('[data-target="maritalStatus"] .ant-select-selection-selected-value').textContent
       };
       const expected = {
         birthDate: "1999-02-03",
