@@ -192,7 +192,7 @@ async function init() {
     db[type] = db[type] || [];
   });
 
-  await importLocalConfig();
+  const localConfigResult = await importLocalConfig();
 
   renderBasic();
   renderAvatar();
@@ -202,6 +202,10 @@ async function init() {
   renderHistoryFilters();
   renderHistory();
   renderMailSettings();
+  if (localConfigResult?.ok && $("#localConfigStatus")) {
+    $("#localConfigStatus").dataset.touched = "1";
+    $("#localConfigStatus").textContent = "已从本地 .env 导入邮件、飞书和模型配置。";
+  }
   renderMailDashboard();
 
   $("#hobbiesText").value = db.hobbies || "";
@@ -225,7 +229,9 @@ async function init() {
 async function importLocalConfig() {
   try {
     const result = await chrome.runtime.sendMessage({ type: "MAIL_IMPORT_LOCAL_CONFIG" });
-    if (!result?.ok) return;
+    if (!result?.ok) {
+      return { ok: false, error: result?.error || "本地桥接未返回配置" };
+    }
     db.settings = db.settings || {};
     if (result.mailSettings) {
       db.mailSettings = {
@@ -250,8 +256,14 @@ async function importLocalConfig() {
       mailSettings: db.mailSettings,
       settings: db.settings
     });
-  } catch {
-    // 本地桥接未安装时保持手动配置路径。
+    return {
+      ok: true,
+      mail: Boolean(result.mailSettings?.address),
+      feishu: Boolean(result.mailSettings?.appId && result.mailSettings?.appSecret),
+      ai: Boolean(result.aiProvider?.apiKey)
+    };
+  } catch (error) {
+    return { ok: false, error: error.message || "本地桥接未安装" };
   }
 }
 
@@ -1223,6 +1235,10 @@ function renderMailSettings() {
     : "尚未启用 AI 模型版本，邮件同步前请先完成设置。";
   $("#mailInstallCommand").textContent =
     `./native-host/install.sh ${chrome.runtime.id}`;
+  const localStatus = $("#localConfigStatus");
+  if (localStatus && !localStatus.dataset.touched) {
+    localStatus.textContent = "本地桥接安装后，可从 native-host/.env 导入配置。";
+  }
   updateBridgeState("idle", "检测本地桥接");
 }
 
@@ -1403,6 +1419,28 @@ $("#copyMailInstall").addEventListener("click", async () => {
   await navigator.clipboard.writeText($("#mailInstallCommand").textContent);
   $("#copyMailInstall").textContent = "已复制";
   setTimeout(() => { $("#copyMailInstall").textContent = "复制"; }, 1200);
+});
+
+$("#importLocalConfig").addEventListener("click", async () => {
+  const button = $("#importLocalConfig");
+  const status = $("#localConfigStatus");
+  button.disabled = true;
+  button.textContent = "导入中…";
+  status.dataset.touched = "1";
+  try {
+    const result = await importLocalConfig();
+    if (!result?.ok) throw new Error(result?.error || "导入失败");
+    renderAiProviders();
+    renderMailSettings();
+    status.dataset.touched = "1";
+    status.textContent = "已导入本地配置，并明文显示在设置页。";
+  } catch (error) {
+    status.dataset.touched = "1";
+    status.textContent = `导入失败：${error.message || error}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = "导入本地配置";
+  }
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
