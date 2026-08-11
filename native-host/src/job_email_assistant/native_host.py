@@ -8,8 +8,6 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from dotenv import dotenv_values
-
 from . import __version__
 from .config import Settings
 from .service import SyncService
@@ -45,8 +43,26 @@ def write_message(stream: BinaryIO, value: dict[str, Any]) -> None:
     stream.flush()
 
 
+def parse_env_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.exists():
+        return values
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        if key:
+            values[key] = value
+    return values
+
+
 def local_config() -> dict[str, Any]:
-    values = dotenv_values(ENV_FILE)
+    values = parse_env_file(ENV_FILE)
     provider_name = values.get("LLM_PROVIDER_NAME") or values.get("LLM_MODEL") or "本地模型"
     return {
         "ok": True,

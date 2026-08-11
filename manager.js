@@ -226,14 +226,19 @@ async function init() {
   if (requestedTab && document.getElementById(requestedTab)) activateTab(requestedTab);
 }
 
-async function importLocalConfig() {
+function orderedProviders(providers) {
+  return providers.map((provider, index) => ({ ...provider, order: index }));
+}
+
+async function importLocalConfig({ force = false } = {}) {
   try {
     const result = await chrome.runtime.sendMessage({ type: "MAIL_IMPORT_LOCAL_CONFIG" });
     if (!result?.ok) {
       return { ok: false, error: result?.error || "本地桥接未返回配置" };
     }
     db.settings = db.settings || {};
-    if (result.mailSettings) {
+    const hasMailSettings = Boolean(db.mailSettings?.address && db.mailSettings?.authCode);
+    if (result.mailSettings && (force || !hasMailSettings)) {
       db.mailSettings = {
         ...mailSettingsDefaults(),
         ...(db.mailSettings || {}),
@@ -243,13 +248,15 @@ async function importLocalConfig() {
     if (result.aiProvider?.apiBase && result.aiProvider?.model && result.aiProvider?.apiKey) {
       const current = normalizeAiProviders(db.settings || {});
       const rest = current.filter(provider => provider.id !== result.aiProvider.id);
+      const shouldImportProvider = force || !current.some(provider => provider.id === result.aiProvider.id);
       db.settings = {
         ...(db.settings || {}),
-        aiProviders: [result.aiProvider, ...rest].map((provider, index) => ({
-          ...provider,
-          order: index,
-          enabled: provider.enabled !== false
-        }))
+        aiProviders: shouldImportProvider
+          ? orderedProviders([result.aiProvider, ...rest].map(provider => ({
+            ...provider,
+            enabled: provider.enabled !== false
+          })))
+          : current
       };
     }
     await chrome.storage.local.set({
@@ -1428,7 +1435,7 @@ $("#importLocalConfig").addEventListener("click", async () => {
   button.textContent = "导入中…";
   status.dataset.touched = "1";
   try {
-    const result = await importLocalConfig();
+    const result = await importLocalConfig({ force: true });
     if (!result?.ok) throw new Error(result?.error || "导入失败");
     renderAiProviders();
     renderMailSettings();
@@ -1872,7 +1879,7 @@ function renderAiProviders() {
       const index = Number(button.dataset.providerUp);
       if (index <= 0) return;
       [providers[index - 1], providers[index]] = [providers[index], providers[index - 1]];
-      db.settings.aiProviders = providers;
+      db.settings.aiProviders = orderedProviders(providers);
       await persistAiSettings();
       renderAiProviders();
       renderMailSettings();
@@ -1883,7 +1890,7 @@ function renderAiProviders() {
       const index = Number(button.dataset.providerDown);
       if (index >= providers.length - 1) return;
       [providers[index], providers[index + 1]] = [providers[index + 1], providers[index]];
-      db.settings.aiProviders = providers;
+      db.settings.aiProviders = orderedProviders(providers);
       await persistAiSettings();
       renderAiProviders();
       renderMailSettings();
