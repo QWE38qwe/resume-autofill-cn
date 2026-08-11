@@ -425,7 +425,7 @@ function renderVersions() {
         <div class="record-title">
           <div>
             <strong>${safe(profile.name)} ${isDefault ? '<span class="field-chip matched">默认</span>' : ""}</strong>
-            <div class="muted">实习 ${profile.work?.length || 0} 段｜附件 ${safe(profile.attachment || "未绑定")}</div>
+            <div class="muted">实习 ${profile.work?.length || 0} 段｜附件 ${safe(profile.attachment || "未绑定")}｜本地简历 ${safe(profile.resumePath || "未填写")}</div>
           </div>
           <div class="record-actions">
             <button class="btn primary small" data-open-version="${profile.id}">${openedVersionId === profile.id ? "收起" : "编辑"}</button>
@@ -480,6 +480,7 @@ function openVersion(id) {
       <div class="form-grid">
         <div class="field"><label>简历版本命名</label><input id="vName" value="${safe(profile.name)}"></div>
         <div class="field"><label>附件</label><input id="vAttachment" value="${safe(profile.attachment)}"></div>
+        <div class="field full-span"><label>本地简历路径</label><input id="vResumePath" value="${safe(profile.resumePath)}" placeholder="例如：/Users/you/Documents/resume-product.pdf"></div>
       </div>
       <div id="workList"></div>
       <div class="version-summary">
@@ -497,6 +498,7 @@ function openVersion(id) {
     if (!name) return $("#vName").focus();
     profile.name = name;
     profile.attachment = $("#vAttachment").value.trim();
+    profile.resumePath = $("#vResumePath").value.trim();
     profile.summary = $("#vSummary").value.trim();
     await saveProfiles();
     openVersion(id);
@@ -588,6 +590,7 @@ function openCreateVersion() {
     <div class="section-title">新建空白版本</div>
     <div class="modal-grid">
       <div class="field full-span"><label>简历版本命名</label><input id="newVersionName" placeholder="例如：互联网产品简历"></div>
+      <div class="field full-span"><label>本地简历路径</label><input id="newVersionPath" placeholder="可选，例如：/Users/you/Documents/resume-product.pdf"></div>
     </div>
     <div class="row">
       <button class="btn ghost" id="cancelModal">取消</button>
@@ -604,6 +607,7 @@ function openCreateVersion() {
       target: "",
       summary: "",
       attachment: "",
+      resumePath: $("#newVersionPath").value.trim(),
       work: []
     };
     db.profiles.push(profile);
@@ -1528,6 +1532,7 @@ function renderParsedDraft() {
     <div class="parse-preview">
       <div class="parse-preview-head">
         <div class="field"><label>新版本名称</label><input id="parsedVersionName" value="${safe(parsedDraft.versionName)}"></div>
+        <div class="field"><label>本地简历路径</label><input id="parsedResumePath" value="${safe(parsedDraft.resumePath)}" placeholder="可选，浏览器无法自动读取完整路径"></div>
         <button class="btn primary" id="createParsedVersion">确认并创建版本</button>
       </div>
       ${parsedDraft.internships.map((work, index) => `
@@ -1591,6 +1596,7 @@ async function createVersionFromParsed() {
     target: "",
     summary: "",
     attachment: parsedDraft.attachment,
+    resumePath: $("#parsedResumePath")?.value.trim() || "",
     work: works,
     openQuestions: []
   };
