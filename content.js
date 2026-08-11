@@ -263,6 +263,14 @@ function controls(root = document) {
   return result;
 }
 
+function customSelectControls(root = document, baseControls = controls(root)) {
+  return queryAllDeep(root, ".phoenix-select")
+    .filter(element => {
+      if (!isVisible(element) || element.getAttribute("aria-disabled") === "true") return false;
+      return !baseControls.some(control => element.contains(control));
+    });
+}
+
 function fileControls(root = document) {
   return queryAllDeep(root, "input[type=file]")
     .filter(element => {
@@ -295,7 +303,7 @@ function fieldTargets(root = document) {
   const base = controls(root).filter(element =>
     !(element instanceof HTMLInputElement && element.type === "radio" && groups.some(group => group.contains(element)))
   );
-  return [...base, ...groups, ...fileControls(root)];
+  return [...base, ...customSelectControls(root, base), ...groups, ...fileControls(root)];
 }
 
 function groupOptionNodes(element) {
@@ -350,6 +358,7 @@ function labelOf(element) {
   );
   const exactFormItem = element.closest([
     ".form-item",
+    ".form-wrap",
     ".ant-form-item",
     ".el-form-item",
     ".ivu-form-item",
@@ -369,6 +378,8 @@ function labelOf(element) {
   ].join(","));
   if (exactFormItem) {
     const title = exactFormItem.querySelector([
+      ":scope > .form-tit",
+      ":scope .form-tit",
       ":scope > .form-item__title",
       ":scope .form-item__title",
       ":scope .ant-form-item-label",
@@ -393,6 +404,7 @@ function labelOf(element) {
   for (let depth = 0; item && item !== document.body && depth < 14; depth += 1, item = item.parentElement) {
     const labelNodes = item.querySelectorAll([
       "label",
+      ".form-tit",
       ".ant-form-item-label",
       ".el-form-item__label",
       ".ivu-form-item-label",
@@ -899,7 +911,8 @@ async function choosePhoenixMonth(element, value) {
       await sleep(220);
     }
   }
-  return Boolean(String(element.value || "").trim());
+  const selectedValue = controlCurrentValue(element);
+  return Boolean(selectedValue && !/请选择|请输入|选择/.test(selectedValue));
 }
 
 function selectWrapperFor(element) {
@@ -1185,6 +1198,9 @@ function controlCurrentValue(element) {
   }
   const wrapper = selectWrapperFor(element);
   const display = wrapper?.querySelector([
+    ".phoenix-select-selection-selected-value",
+    ".phoenix-select-selection__rendered",
+    ".phoenix-select-selection__choice__content",
     "[class*='Input-display-value']",
     ".ant-select-selection-item",
     ".el-select__selected-item",
@@ -1193,7 +1209,7 @@ function controlCurrentValue(element) {
     "[class*='SelectedValue']"
   ].join(","));
   const displayValue = String(display?.innerText || display?.textContent || "").trim();
-  if (displayValue || /sd-Select/.test(String(wrapper?.className || ""))) return displayValue;
+  if (displayValue || /sd-Select|phoenix-select/.test(String(wrapper?.className || ""))) return displayValue;
   return String(element.value ?? element.textContent ?? "").trim();
 }
 

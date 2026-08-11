@@ -16,7 +16,9 @@ cd "/Users/bytedance/Desktop/简填插件_V0.4.0"
 ```
 
 脚本使用 `uv` 创建隔离的 Python 3.12 环境，并分别注册 Chrome 与 Edge 的
-Native Messaging manifest。重新加载扩展后，在“邮件待办”点击“测试连接”。
+Native Messaging manifest。脚本还会从 `.env` 生成权限为 `600` 的
+`local-config.json`，供设置页导入并明文展示本机配置；两者均已被 Git 忽略。
+重新加载扩展后，在“邮件待办”点击“测试连接”。
 
 ## 卸载
 

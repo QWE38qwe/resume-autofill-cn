@@ -128,11 +128,14 @@ node --check popup.js
 bash scripts/privacy-check.sh
 ```
 
-京东重复经历夹具可通过本地静态服务器打开：
+京东、Hotjob 和头像回归夹具可通过本地静态服务器打开：
 
 ```bash
 python3 -m http.server 8877
 # 浏览器访问 http://127.0.0.1:8877/tests/jd-fixture.html
+# 浏览器访问 http://127.0.0.1:8877/tests/hotjob-basic-fixture.html
+# 浏览器访问 http://127.0.0.1:8877/tests/hotjob-work-fixture.html
+# 浏览器访问 http://127.0.0.1:8877/tests/avatar-fixture.html
 ```
 
 ## 安全

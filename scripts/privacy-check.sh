@@ -5,10 +5,11 @@ cd "$(dirname "$0")/.."
 
 files=()
 while IFS= read -r file; do
-  files+=("$file")
-done < <(find . -maxdepth 2 -type f \
-  \( -name '*.js' -o -name '*.html' -o -name '*.css' -o -name '*.md' -o -name '*.json' \) \
-  ! -path './vendor/*' ! -path './.git/*' -print)
+  case "$file" in
+    vendor/*) ;;
+    *.js|*.html|*.css|*.md|*.json) files+=("$file") ;;
+  esac
+done < <(git ls-files --cached --others --exclude-standard)
 
 if ((${#files[@]} == 0)); then
   echo "No source files found."

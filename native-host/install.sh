@@ -19,6 +19,9 @@ fi
 cd "$ROOT"
 uv sync
 chmod 700 "$ROOT/run-host.sh"
+"$ROOT/.venv/bin/python" \
+  -m job_email_assistant.export_local_config \
+  "$ROOT/local-config.json"
 
 MANIFEST=$(cat <<EOF
 {
@@ -43,4 +46,5 @@ for directory in "${TARGETS[@]}"; do
 done
 
 echo "Native Host 安装完成。"
+echo "设置页本地配置文件已生成。"
 echo "请在扩展管理页重新加载“简填”，再到“邮件待办”测试连接。"

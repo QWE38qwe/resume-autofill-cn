@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Hotjob basic information fixture</title>
+  <style>
+    body { margin: 24px; font: 16px sans-serif; }
+    .form-wrap { display: grid; grid-template-columns: 160px 420px; align-items: center; margin: 14px 0; }
+    .form-tit { font-weight: 600; }
+    input, .phoenix-select { box-sizing: border-box; min-height: 40px; padding: 9px 12px; border: 1px solid #bbb; }
+    .phoenix-select { cursor: pointer; }
+    .phoenix-select-dropdown { position: absolute; z-index: 10; width: 420px; background: white; border: 1px solid #999; }
+    .phoenix-select-dropdown[hidden] { display: none; }
+    .phoenix-select-dropdown li { padding: 8px 12px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main id="basic-form">
+    <div class="form-wrap">
+      <div class="form-tit">出生日期</div>
+      <div class="form-main"><input id="birthDate" type="date"></div>
+    </div>
+    <div class="form-wrap">
+      <div class="form-tit">政治面貌</div>
+      <div class="form-main"><div class="phoenix-select" data-target="politics"><span class="phoenix-select-selection-selected-value">请选择</span></div></div>
+    </div>
+    <div class="form-wrap">
+      <div class="form-tit">证件类型</div>
+      <div class="form-main"><div class="phoenix-select" data-target="identityType"><span class="phoenix-select-selection-selected-value">请选择</span></div></div>
+    </div>
+    <div class="form-wrap">
+      <div class="form-tit">证件号码</div>
+      <div class="form-main"><input id="identityNumber"></div>
+    </div>
+    <div class="form-wrap">
+      <div class="form-tit">民族</div>
+      <div class="form-main"><div class="phoenix-select" data-target="ethnicity"><span class="phoenix-select-selection-selected-value">请选择</span></div></div>
+    </div>
+    <div class="form-wrap">
+      <div class="form-tit">婚姻状况</div>
+      <div class="form-main"><div class="phoenix-select" data-target="maritalStatus"><span class="phoenix-select-selection-selected-value">请选择</span></div></div>
+    </div>
+  </main>
+
+  <div class="phoenix-select-dropdown" data-menu="politics" hidden><ul><li>中共党员</li><li>群众</li></ul></div>
+  <div class="phoenix-select-dropdown" data-menu="identityType" hidden><ul><li>居民身份证</li><li>护照</li></ul></div>
+  <div class="phoenix-select-dropdown" data-menu="ethnicity" hidden><ul><li>汉族</li><li>满族</li></ul></div>
+  <div class="phoenix-select-dropdown" data-menu="maritalStatus" hidden><ul><li>未婚</li><li>已婚</li></ul></div>
+
+  <button type="button" id="run-fixture">运行夹具</button>
+  <pre id="result">not-run</pre>
+
+  <script>
+    document.querySelectorAll(".phoenix-select").forEach(select => {
+      const menu = document.querySelector(`[data-menu="${select.dataset.target}"]`);
+      select.addEventListener("click", () => {
+        document.querySelectorAll(".phoenix-select-dropdown").forEach(item => {
+          item.hidden = item !== menu;
+        });
+      });
+      menu.querySelectorAll("li").forEach(option => {
+        option.addEventListener("click", () => {
+          select.querySelector(".phoenix-select-selection-selected-value").textContent = option.textContent;
+          menu.hidden = true;
+        });
+      });
+    });
+
+    const fixtureStore = {
+      personal: {
+        birthDate: "1999-02-03",
+        politics: "中共党员",
+        identityType: "居民身份证",
+        identityNumber: "110101199902030011",
+        ethnicity: "汉族",
+        maritalStatus: "未婚"
+      },
+      education: [],
+      profiles: [],
+      activeProfileId: "",
+      projects: [],
+      languages: [],
+      skills: [],
+      awards: [],
+      papers: [],
+      certificates: [],
+      portfolio: [],
+      customFields: [],
+      settings: {}
+    };
+
+    window.chrome = {
+      storage: {
+        local: {
+          get: async keys => Object.fromEntries(keys.map(key => [key, fixtureStore[key]]))
+        }
+      },
+      runtime: {
+        sendMessage: async () => ({ matches: [], source: "disabled" }),
+        onMessage: { addListener() {} }
+      }
+    };
+  </script>
+  <script src="../content.js"></script>
+  <script>
+    window.runHotjobBasicFixture = async () => {
+      const output = await window.__jianfillTest.fillCurrentFrame("full");
+      const values = {
+        birthDate: document.querySelector("#birthDate").value,
+        politics: document.querySelector('[data-target="politics"] span').textContent,
+        identityType: document.querySelector('[data-target="identityType"] span').textContent,
+        identityNumber: document.querySelector("#identityNumber").value,
+        ethnicity: document.querySelector('[data-target="ethnicity"] span').textContent,
+        maritalStatus: document.querySelector('[data-target="maritalStatus"] span').textContent
+      };
+      const expected = {
+        birthDate: "1999-02-03",
+        politics: "中共党员",
+        identityType: "居民身份证",
+        identityNumber: "110101199902030011",
+        ethnicity: "汉族",
+        maritalStatus: "未婚"
+      };
+      const result = {
+        output,
+        values,
+        pass: Object.entries(expected).every(([key, value]) => values[key] === value)
+      };
+      document.querySelector("#result").textContent = JSON.stringify(result, null, 2);
+      return result;
+    };
+
+    document.querySelector("#run-fixture").addEventListener("click", window.runHotjobBasicFixture);
+  </script>
+</body>
+</html>

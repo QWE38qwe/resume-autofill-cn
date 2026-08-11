@@ -232,9 +232,24 @@ function orderedProviders(providers) {
 
 async function importLocalConfig({ force = false } = {}) {
   try {
-    const result = await chrome.runtime.sendMessage({ type: "MAIL_IMPORT_LOCAL_CONFIG" });
+    let result;
+    try {
+      const response = await fetch(chrome.runtime.getURL("native-host/local-config.json"), {
+        cache: "no-store"
+      });
+      if (!response.ok) throw new Error(`本地配置文件不可用 (${response.status})`);
+      result = await response.json();
+    } catch (fileError) {
+      result = await chrome.runtime.sendMessage({ type: "MAIL_IMPORT_LOCAL_CONFIG" });
+      if (!result?.ok && fileError?.message) {
+        result = {
+          ...result,
+          error: `${fileError.message}；${result?.error || "本地桥接未返回配置"}`
+        };
+      }
+    }
     if (!result?.ok) {
-      return { ok: false, error: result?.error || "本地桥接未返回配置" };
+      return { ok: false, error: result?.error || "未读取到本地配置" };
     }
     db.settings = db.settings || {};
     const hasMailSettings = Boolean(db.mailSettings?.address && db.mailSettings?.authCode);
@@ -1244,7 +1259,7 @@ function renderMailSettings() {
     `./native-host/install.sh ${chrome.runtime.id}`;
   const localStatus = $("#localConfigStatus");
   if (localStatus && !localStatus.dataset.touched) {
-    localStatus.textContent = "本地桥接安装后，可从 native-host/.env 导入配置。";
+    localStatus.textContent = "运行本地桥接安装脚本后，可从 native-host/.env 导入配置。";
   }
   updateBridgeState("idle", "检测本地桥接");
 }
