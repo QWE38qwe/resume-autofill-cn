@@ -19,5 +19,8 @@ Security reports may cover:
 - Unintended transmission of personal values.
 - Cross-origin or iframe handling problems.
 - Unsafe DOM interaction on recruitment websites.
+- Native Messaging host command or message validation problems.
+- Unintended exposure of mailbox authorization codes or Feishu application secrets.
 
-The extension never needs users to share account passwords or authentication cookies with maintainers.
+The extension never needs users to share account passwords, mailbox authorization codes,
+API keys, application secrets, or authentication cookies with maintainers.

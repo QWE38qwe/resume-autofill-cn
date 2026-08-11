@@ -1,11 +1,14 @@
 const defaultAiRules = [];
+const MAIL_NATIVE_HOST = "cn.local.jianfill.mail";
+const MAIL_ALARM = "jianfill-mail-sync";
 
 chrome.runtime.onInstalled.addListener(async () => {
   const current = await chrome.storage.local.get(null);
-  const payload = { seedVersion: 4 };
+  const payload = { seedVersion: 5 };
   const arrayKeys = [
     "education", "profiles", "projects", "awards", "languages", "skills",
-    "certificates", "family", "papers", "portfolio", "customFields", "fillHistory"
+    "certificates", "family", "papers", "portfolio", "customFields", "fillHistory",
+    "mailHistory"
   ];
   if (!current.personal) payload.personal = {};
   arrayKeys.forEach(key => {
@@ -23,7 +26,22 @@ chrome.runtime.onInstalled.addListener(async () => {
   };
   if (!Array.isArray(settings.aiRules)) settings.aiRules = defaultAiRules;
   payload.settings = settings;
+  payload.mailSettings = {
+    host: "imap.126.com",
+    port: 993,
+    folder: "INBOX",
+    autoSync: true,
+    dryRun: true,
+    syncIntervalMinutes: 120,
+    tableId: "tblhXjQP5FKvqWUm",
+    companyField: "公司",
+    noteField: "note",
+    assessmentLinkField: "测评链接",
+    ddlField: "ddl",
+    ...(current.mailSettings || {})
+  };
   await chrome.storage.local.set(payload);
+  await scheduleMailSync(payload.mailSettings);
 });
 
 function chatEndpoint(apiBase) {
@@ -128,10 +146,157 @@ ${JSON.stringify(candidates)}`;
   return { matches, source: "deepseek" };
 }
 
+function sendNativeMessage(payload) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendNativeMessage(MAIL_NATIVE_HOST, payload, response => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message || "本地桥接不可用"));
+        return;
+      }
+      if (!response) {
+        reject(new Error("本地桥接没有返回结果"));
+        return;
+      }
+      resolve(response);
+    });
+  });
+}
+
+async function scheduleMailSync(mailSettings = {}) {
+  await chrome.alarms.clear(MAIL_ALARM);
+  if (!mailSettings.autoSync) return;
+  const periodInMinutes = Math.max(30, Number(mailSettings.syncIntervalMinutes) || 120);
+  await chrome.alarms.create(MAIL_ALARM, { periodInMinutes });
+}
+
+function mailPayload(mailSettings, settings, dryRun) {
+  return {
+    action: "sync",
+    dryRun: Boolean(dryRun),
+    pollIntervalMinutes: Number(mailSettings.syncIntervalMinutes) || 120,
+    mail: {
+      address: mailSettings.address,
+      authCode: mailSettings.authCode,
+      host: mailSettings.host || "imap.126.com",
+      port: Number(mailSettings.port) || 993,
+      folder: mailSettings.folder || "INBOX"
+    },
+    ai: {
+      apiBase: settings.apiBase,
+      apiKey: settings.apiKey,
+      model: settings.model,
+      timeoutSeconds: 60
+    },
+    feishu: {
+      appId: mailSettings.appId,
+      appSecret: mailSettings.appSecret,
+      baseToken: mailSettings.baseToken,
+      tableId: mailSettings.tableId,
+      companyField: mailSettings.companyField || "公司",
+      noteField: mailSettings.noteField || "note",
+      assessmentLinkField: mailSettings.assessmentLinkField || "测评链接",
+      ddlField: mailSettings.ddlField || "ddl"
+    }
+  };
+}
+
+function mergeMailHistory(existing, incoming) {
+  const merged = new Map((existing || []).map(item => [item.messageId, item]));
+  (incoming || []).forEach(item => {
+    if (item.status === "已处理" && merged.has(item.messageId)) return;
+    merged.set(item.messageId, item);
+  });
+  return [...merged.values()]
+    .sort((left, right) => Date.parse(right.receivedAt || 0) - Date.parse(left.receivedAt || 0))
+    .slice(0, 300);
+}
+
+async function syncMail({ dryRun, source = "manual" } = {}) {
+  const { mailSettings = {}, settings = {}, mailHistory = [] } =
+    await chrome.storage.local.get(["mailSettings", "settings", "mailHistory"]);
+  const startedAt = new Date().toISOString();
+  await chrome.storage.local.set({
+    mailSyncStatus: { state: "syncing", source, startedAt }
+  });
+  try {
+    const effectiveDryRun = dryRun ?? Boolean(mailSettings.dryRun);
+    const response = await sendNativeMessage(
+      mailPayload(mailSettings, settings, effectiveDryRun)
+    );
+    if (!response.ok) throw new Error(response.error || "邮件同步失败");
+    const summary = response.summary || {};
+    const nextHistory = mergeMailHistory(mailHistory, summary.details);
+    const mailSyncStatus = {
+      state: "success",
+      source,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      summary: {
+        fetched: summary.fetched || 0,
+        updated: summary.updated || 0,
+        irrelevant: summary.irrelevant || 0,
+        needsReview: summary.needs_review || 0,
+        failed: summary.failed || 0
+      }
+    };
+    await chrome.storage.local.set({ mailHistory: nextHistory, mailSyncStatus });
+    return { ok: true, summary: mailSyncStatus.summary, details: summary.details || [] };
+  } catch (error) {
+    const mailSyncStatus = {
+      state: "error",
+      source,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      error: error.message || "邮件同步失败"
+    };
+    await chrome.storage.local.set({ mailSyncStatus });
+    throw error;
+  }
+}
+
+chrome.runtime.onStartup.addListener(async () => {
+  const { mailSettings = {} } = await chrome.storage.local.get(["mailSettings"]);
+  await scheduleMailSync(mailSettings);
+});
+
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name !== MAIL_ALARM) return;
+  syncMail({ source: "alarm" }).catch(() => {});
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "OPEN_OPTIONS") {
     chrome.runtime.openOptionsPage();
     return;
+  }
+  if (message.type === "OPEN_MAIL") {
+    chrome.tabs.create({ url: chrome.runtime.getURL("options.html#mail") });
+    return;
+  }
+  if (message.type === "MAIL_PING") {
+    sendNativeMessage({ action: "ping" })
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message.type === "MAIL_SYNC") {
+    syncMail({ dryRun: Boolean(message.dryRun), source: "manual" })
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message.type === "MAIL_SETTINGS_CHANGED") {
+    scheduleMailSync(message.mailSettings || {})
+      .then(() => sendResponse({ ok: true }))
+      .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message.type === "MAIL_RETRY_REVIEW") {
+    sendNativeMessage({ action: "retryReview" })
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
   }
   if (message.type === "AI_MATCH_FIELDS") {
     aiMatchFields(message)

@@ -175,4 +175,5 @@ $("#fill").onclick = () => runFill("full", $("#fill"));
 $("#supplement").onclick = () => runFill("supplement", $("#supplement"));
 
 $("#manage").onclick = $("#settings").onclick = () => chrome.runtime.sendMessage({ type: "OPEN_OPTIONS" });
+$("#mailTasks").onclick = () => chrome.runtime.sendMessage({ type: "OPEN_MAIL" });
 init();

@@ -17,3 +17,10 @@ release/
 *.docx
 *.csv
 *.xlsx
+native-host/backups/
+native-host/data/
+native-host/.venv/
+native-host/local-config.json
+native-host/.pytest_cache/
+native-host/**/__pycache__/
+native-host/src/*.egg-info/

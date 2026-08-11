@@ -18,6 +18,7 @@
       </div>
       <nav id="nav" aria-label="主导航">
         <button data-tab="home" class="active" title="概览"><span class="nav-icon">⌂</span><span class="nav-label">概览</span></button>
+        <button data-tab="mail" title="邮件待办"><span class="nav-icon">邮</span><span class="nav-label">邮件待办</span></button>
         <button data-tab="profile" title="个人资料"><span class="nav-icon">人</span><span class="nav-label">个人资料</span></button>
         <button data-tab="growth" title="教育背景"><span class="nav-icon">学</span><span class="nav-label">教育背景</span></button>
         <button data-tab="versions" title="简历版本"><span class="nav-icon">版</span><span class="nav-label">简历版本</span></button>
@@ -44,6 +45,38 @@
     </div>
     <div class="result-summary" id="historySummary"></div>
     <div class="table-wrap" id="dashboardHistory"></div>
+  </div>
+</section>
+<section id="mail" class="section">
+  <div class="mail-hero">
+    <div>
+      <span class="section-kicker">INBOX SIGNALS</span>
+      <h1>邮件待办</h1>
+      <p>只捕捉最近 7 天内明确要求完成的测评与面试邀约。</p>
+    </div>
+    <div class="mail-hero-actions">
+      <span class="bridge-state" id="mailBridgeStatus"><i></i>检测本地桥接</span>
+      <button class="btn secondary" id="testMailBridge">测试连接</button>
+      <button class="btn primary" id="syncMailNow">立即同步</button>
+    </div>
+  </div>
+
+  <div class="surface mail-board-surface">
+    <div class="surface-head">
+      <div><span class="section-kicker">最近 7 天</span><h2>读取记录</h2><p id="mailLastSync">尚未同步</p></div>
+      <button class="btn ghost" id="retryMailReview">重试待确认</button>
+    </div>
+    <div class="mail-metrics">
+      <div><span>读取</span><strong id="mailFetchedMetric">0</strong></div>
+      <div><span>写入</span><strong id="mailUpdatedMetric">0</strong></div>
+      <div><span>忽略</span><strong id="mailIgnoredMetric">0</strong></div>
+      <div><span>待确认</span><strong id="mailReviewMetric">0</strong></div>
+    </div>
+    <div class="mail-filters">
+      <select id="mailStatusFilter"><option value="">全部状态</option><option>已写入</option><option>待确认</option><option>已忽略</option><option>失败</option></select>
+      <select id="mailCategoryFilter"><option value="">全部分类</option><option>在线测评</option><option>ai面试</option><option>面试邀约</option></select>
+    </div>
+    <div id="mailHistoryTable"><div class="empty">同步后会显示读取过的邮件及处理结果</div></div>
   </div>
 </section>
 <section id="profile" class="section">
@@ -124,6 +157,56 @@
       <span>不会自动勾选协议</span>
     </div>
     <div id="aiRuleList"></div>
+  </div>
+  <div class="surface settings-card">
+    <div class="surface-head">
+      <div><span class="section-kicker">邮件配置</span><h2>126 / 163 IMAP</h2><p>使用邮箱客户端授权码，仅查询收件箱最近 7 天。</p></div>
+    </div>
+    <div class="form-grid">
+      <div class="field"><label for="mailAddress">邮箱账号</label><input id="mailAddress" type="email" autocomplete="username" placeholder="填写 126 或 163 邮箱"></div>
+      <div class="field"><label for="mailAuthCode">客户端授权码</label><input id="mailAuthCode" type="password" autocomplete="off" placeholder="非网页登录密码"></div>
+      <div class="field"><label for="mailHost">IMAP 地址</label><input id="mailHost" placeholder="imap.126.com"></div>
+      <div class="field"><label for="mailPort">SSL 端口</label><input id="mailPort" type="number" min="1" max="65535" value="993"></div>
+    </div>
+  </div>
+  <div class="surface settings-card">
+    <div class="surface-head">
+      <div><span class="section-kicker">飞书写入</span><h2>目标多维表格</h2><p>唯一公司匹配后，仅更新 note、测评链接和 ddl。</p></div>
+    </div>
+    <div class="form-grid">
+      <div class="field"><label for="mailFeishuAppId">App ID</label><input id="mailFeishuAppId" autocomplete="off"></div>
+      <div class="field"><label for="mailFeishuSecret">App Secret</label><input id="mailFeishuSecret" type="password" autocomplete="off"></div>
+      <div class="field"><label for="mailBaseToken">Base Token</label><input id="mailBaseToken" autocomplete="off"></div>
+      <div class="field"><label for="mailTableId">Table ID</label><input id="mailTableId" value="tblhXjQP5FKvqWUm"></div>
+    </div>
+    <details class="advanced-fields">
+      <summary>字段映射</summary>
+      <div class="form-grid">
+        <div class="field"><label for="mailCompanyField">公司字段</label><input id="mailCompanyField" value="公司"></div>
+        <div class="field"><label for="mailNoteField">分类字段</label><input id="mailNoteField" value="note"></div>
+        <div class="field"><label for="mailLinkField">链接字段</label><input id="mailLinkField" value="测评链接"></div>
+        <div class="field"><label for="mailDdlField">截止时间字段</label><input id="mailDdlField" value="ddl"></div>
+      </div>
+    </details>
+  </div>
+  <div class="surface settings-card">
+    <div class="surface-head">
+      <div><span class="section-kicker">邮件运行方式</span><h2>同步与模型</h2><p id="mailAiSummary">读取现有 AI 设置中…</p></div>
+    </div>
+    <div class="sync-preferences">
+      <label class="switch-row"><input id="mailAutoSync" type="checkbox"><span><b>每 2 小时自动同步</b><small>仅在浏览器运行期间触发</small></span></label>
+      <label class="switch-row"><input id="mailDryRun" type="checkbox"><span><b>预演模式</b><small>读取和识别邮件，但不写飞书</small></span></label>
+    </div>
+    <div class="settings-actions">
+      <span class="muted">账号、授权码和飞书配置保存在本机浏览器。</span>
+      <button class="btn primary" id="saveMailSettings">保存邮件设置</button>
+    </div>
+  </div>
+  <div class="surface native-install-card">
+    <div class="surface-head">
+      <div><span class="section-kicker">一次性安装</span><h2>本地桥接</h2><p>扩展需要 Native Messaging 才能访问 IMAP。安装后日常使用无需终端。</p></div>
+    </div>
+    <div class="install-command"><code id="mailInstallCommand"></code><button class="btn ghost small" id="copyMailInstall">复制</button></div>
   </div>
 </section>
     </main>

@@ -7,6 +7,10 @@ function safe(value) {
   return node.innerHTML;
 }
 
+function safeAttr(value) {
+  return safe(value).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
 const schemas = {
   education: [
     ["school", "学校"], ["college", "学院"], ["major", "专业"], ["level", "学历"],
@@ -154,6 +158,8 @@ async function init() {
   renderVersions();
   renderHistoryFilters();
   renderHistory();
+  renderMailSettings();
+  renderMailDashboard();
 
   $("#hobbiesText").value = db.hobbies || "";
   const settings = db.settings || {};
@@ -166,6 +172,9 @@ async function init() {
     await chrome.storage.local.set({ settings });
   }
   renderAiRules();
+
+  const requestedTab = location.hash.replace(/^#/, "");
+  if (requestedTab && document.getElementById(requestedTab)) activateTab(requestedTab);
 }
 
 function renderBasic() {
@@ -421,6 +430,7 @@ function renderVersions() {
           <div class="record-actions">
             <button class="btn primary small" data-open-version="${profile.id}">${openedVersionId === profile.id ? "收起" : "编辑"}</button>
             ${isDefault ? "" : `<button class="btn ghost small" data-default-version="${profile.id}">设为默认</button>`}
+            <button class="btn ghost small" data-copy-version="${profile.id}">复制</button>
             <button class="btn ghost small" data-rename="${profile.id}">重命名</button>
             <button class="btn ghost small danger-btn" data-del-version="${profile.id}">删除</button>
           </div>
@@ -434,6 +444,9 @@ function renderVersions() {
   });
   $$("[data-default-version]").forEach(button => {
     button.onclick = () => setDefaultVersion(button.dataset.defaultVersion);
+  });
+  $$("[data-copy-version]").forEach(button => {
+    button.onclick = () => copyVersion(button.dataset.copyVersion);
   });
   $$("[data-rename]").forEach(button => {
     button.onclick = () => renameVersion(button.dataset.rename);
@@ -607,6 +620,28 @@ $("#addVersion").addEventListener("click", openCreateVersion);
 async function setDefaultVersion(id) {
   db.activeProfileId = id;
   await saveProfiles();
+}
+
+function uniqueCopyName(baseName) {
+  const base = `${baseName || "未命名版本"} 副本`;
+  const existing = new Set(db.profiles.map(profile => profile.name));
+  if (!existing.has(base)) return base;
+  let index = 2;
+  while (existing.has(`${base} ${index}`)) index += 1;
+  return `${base} ${index}`;
+}
+
+async function copyVersion(id) {
+  const profile = db.profiles.find(item => item.id === id);
+  if (!profile) return;
+  const copy = JSON.parse(JSON.stringify(profile));
+  copy.id = crypto.randomUUID();
+  copy.name = uniqueCopyName(profile.name);
+  db.profiles.push(copy);
+  openedVersionId = copy.id;
+  await saveProfiles();
+  openVersion(copy.id);
+  $("#versionEditor").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renameVersion(id) {
@@ -1000,6 +1035,235 @@ $("#addHistory").addEventListener("click", () => {
     renderHistoryFilters();
     renderHistory();
   };
+});
+
+function mailSettingsDefaults() {
+  return {
+    host: "imap.126.com",
+    port: 993,
+    folder: "INBOX",
+    autoSync: true,
+    dryRun: true,
+    syncIntervalMinutes: 120,
+    tableId: "tblhXjQP5FKvqWUm",
+    companyField: "公司",
+    noteField: "note",
+    assessmentLinkField: "测评链接",
+    ddlField: "ddl"
+  };
+}
+
+function renderMailSettings() {
+  const settings = { ...mailSettingsDefaults(), ...(db.mailSettings || {}) };
+  $("#mailAddress").value = settings.address || "";
+  $("#mailAuthCode").value = settings.authCode || "";
+  $("#mailHost").value = settings.host;
+  $("#mailPort").value = settings.port;
+  $("#mailFeishuAppId").value = settings.appId || "";
+  $("#mailFeishuSecret").value = settings.appSecret || "";
+  $("#mailBaseToken").value = settings.baseToken || "";
+  $("#mailTableId").value = settings.tableId;
+  $("#mailCompanyField").value = settings.companyField;
+  $("#mailNoteField").value = settings.noteField;
+  $("#mailLinkField").value = settings.assessmentLinkField;
+  $("#mailDdlField").value = settings.ddlField;
+  $("#mailAutoSync").checked = Boolean(settings.autoSync);
+  $("#mailDryRun").checked = Boolean(settings.dryRun);
+
+  const ai = db.settings || {};
+  $("#mailAiSummary").textContent = ai.apiKey
+    ? `共用 ${ai.model || "已配置模型"} · ${ai.apiBase || "自定义 API"}`
+    : "尚未配置 AI 服务，邮件同步前请先完成设置。";
+  $("#mailInstallCommand").textContent =
+    `./native-host/install.sh ${chrome.runtime.id}`;
+  updateBridgeState("idle", "检测本地桥接");
+}
+
+function mailSettingsFromForm() {
+  return {
+    address: $("#mailAddress").value.trim(),
+    authCode: $("#mailAuthCode").value.trim(),
+    host: $("#mailHost").value.trim() || "imap.126.com",
+    port: Number($("#mailPort").value) || 993,
+    folder: "INBOX",
+    appId: $("#mailFeishuAppId").value.trim(),
+    appSecret: $("#mailFeishuSecret").value.trim(),
+    baseToken: $("#mailBaseToken").value.trim(),
+    tableId: $("#mailTableId").value.trim(),
+    companyField: $("#mailCompanyField").value.trim() || "公司",
+    noteField: $("#mailNoteField").value.trim() || "note",
+    assessmentLinkField: $("#mailLinkField").value.trim() || "测评链接",
+    ddlField: $("#mailDdlField").value.trim() || "ddl",
+    autoSync: $("#mailAutoSync").checked,
+    dryRun: $("#mailDryRun").checked,
+    syncIntervalMinutes: 120
+  };
+}
+
+async function persistMailSettings(showNotice = true) {
+  const settings = mailSettingsFromForm();
+  db.mailSettings = settings;
+  await chrome.storage.local.set({ mailSettings: settings });
+  const result = await chrome.runtime.sendMessage({
+    type: "MAIL_SETTINGS_CHANGED",
+    mailSettings: settings
+  });
+  if (!result?.ok) throw new Error(result?.error || "自动同步配置失败");
+  if (showNotice) alert("邮件设置已保存");
+  return settings;
+}
+
+function updateBridgeState(state, text) {
+  const node = $("#mailBridgeStatus");
+  node.className = `bridge-state ${state}`;
+  node.innerHTML = `<i></i>${safe(text)}`;
+}
+
+function mailStatusClass(status) {
+  if (status === "已写入" || status === "将写入") return "matched";
+  if (status === "待确认") return "unmatched";
+  if (status === "失败") return "danger";
+  return "skipped";
+}
+
+function formatMailTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || "—";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(date);
+}
+
+function filteredMailHistory() {
+  const status = $("#mailStatusFilter").value;
+  const category = $("#mailCategoryFilter").value;
+  return (db.mailHistory || []).filter(item =>
+    (!status || item.status === status) &&
+    (!category || item.category === category)
+  );
+}
+
+function renderMailDashboard() {
+  const status = db.mailSyncStatus || {};
+  const summary = status.summary || {};
+  $("#mailFetchedMetric").textContent = summary.fetched || 0;
+  $("#mailUpdatedMetric").textContent = summary.updated || 0;
+  $("#mailIgnoredMetric").textContent = summary.irrelevant || 0;
+  $("#mailReviewMetric").textContent = summary.needsReview || 0;
+  if (status.state === "syncing") {
+    $("#mailLastSync").textContent = "正在读取邮箱并核对飞书…";
+  } else if (status.state === "error") {
+    $("#mailLastSync").textContent = `同步失败：${status.error || "未知错误"}`;
+  } else if (status.finishedAt) {
+    $("#mailLastSync").textContent = `最近同步 ${formatMailTime(status.finishedAt)}`;
+  } else {
+    $("#mailLastSync").textContent = "尚未同步";
+  }
+
+  const rows = filteredMailHistory();
+  if (!rows.length) {
+    $("#mailHistoryTable").innerHTML = '<div class="empty">没有符合筛选条件的邮件记录</div>';
+    return;
+  }
+  $("#mailHistoryTable").innerHTML = `
+    <div class="mail-table-wrap">
+      <table class="mail-table">
+        <thead><tr><th>状态</th><th>邮件</th><th>分类</th><th>DDL</th><th>接收时间</th></tr></thead>
+        <tbody>
+          ${rows.map(item => {
+            const link = httpUrl(item.assessmentUrl);
+            return `
+              <tr>
+                <td><span class="field-chip ${mailStatusClass(item.status)}">${safe(item.status || "未知")}</span></td>
+                <td>
+                  <div class="mail-subject" title="${safeAttr(item.subject || "")}">${safe(item.subject || "无主题")}</div>
+                  <small>${safe(item.company || item.reason || "未识别公司")}</small>
+                </td>
+                <td>${item.category ? `<span class="mail-category">${safe(item.category)}</span>` : '<span class="cell-empty">—</span>'}</td>
+                <td>${item.deadline ? `<time>${safe(item.deadline)}</time>` : '<span class="cell-empty">—</span>'}</td>
+                <td>
+                  <time>${safe(formatMailTime(item.receivedAt))}</time>
+                  ${link ? `<a class="mail-open" href="${safeAttr(link)}" target="_blank" rel="noopener">打开 ↗</a>` : ""}
+                </td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function refreshMailState() {
+  const state = await chrome.storage.local.get(["mailHistory", "mailSyncStatus"]);
+  db.mailHistory = state.mailHistory || [];
+  db.mailSyncStatus = state.mailSyncStatus || {};
+  renderMailDashboard();
+}
+
+$("#saveMailSettings").addEventListener("click", async () => {
+  try {
+    await persistMailSettings();
+  } catch (error) {
+    alert(error.message || "保存失败");
+  }
+});
+
+$("#testMailBridge").addEventListener("click", async () => {
+  updateBridgeState("loading", "正在连接");
+  const result = await chrome.runtime.sendMessage({ type: "MAIL_PING" });
+  updateBridgeState(result?.ok ? "success" : "error", result?.ok ? "本地桥接可用" : "本地桥接未安装");
+});
+
+$("#syncMailNow").addEventListener("click", async () => {
+  const button = $("#syncMailNow");
+  button.disabled = true;
+  button.textContent = "同步中…";
+  try {
+    const mailSettings = await persistMailSettings(false);
+    const ai = db.settings || {};
+    if (!ai.apiKey) throw new Error("请先在设置中配置 AI API Key");
+    const result = await chrome.runtime.sendMessage({
+      type: "MAIL_SYNC",
+      dryRun: Boolean(mailSettings.dryRun)
+    });
+    if (!result?.ok) throw new Error(result?.error || "同步失败");
+    await refreshMailState();
+    updateBridgeState("success", "同步完成");
+  } catch (error) {
+    await refreshMailState();
+    updateBridgeState("error", "同步失败");
+    alert(error.message || "同步失败");
+  } finally {
+    button.disabled = false;
+    button.textContent = "立即同步";
+  }
+});
+
+$("#retryMailReview").addEventListener("click", async () => {
+  const result = await chrome.runtime.sendMessage({ type: "MAIL_RETRY_REVIEW" });
+  if (!result?.ok) return alert(result?.error || "重置失败");
+  alert(`已解除 ${result.cleared || 0} 封待确认邮件的去重状态，请重新同步。`);
+});
+
+$("#goAiSettings")?.addEventListener("click", () => activateTab("api"));
+$("#mailStatusFilter").addEventListener("change", renderMailDashboard);
+$("#mailCategoryFilter").addEventListener("change", renderMailDashboard);
+$("#copyMailInstall").addEventListener("click", async () => {
+  await navigator.clipboard.writeText($("#mailInstallCommand").textContent);
+  $("#copyMailInstall").textContent = "已复制";
+  setTimeout(() => { $("#copyMailInstall").textContent = "复制"; }, 1200);
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || (!changes.mailHistory && !changes.mailSyncStatus)) return;
+  if (changes.mailHistory) db.mailHistory = changes.mailHistory.newValue || [];
+  if (changes.mailSyncStatus) db.mailSyncStatus = changes.mailSyncStatus.newValue || {};
+  renderMailDashboard();
 });
 
 $("#showImport").addEventListener("click", () => {
