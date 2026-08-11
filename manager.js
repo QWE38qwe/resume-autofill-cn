@@ -192,6 +192,8 @@ async function init() {
     db[type] = db[type] || [];
   });
 
+  await importLocalConfig();
+
   renderBasic();
   renderAvatar();
   renderCustomFields();
@@ -218,6 +220,39 @@ async function init() {
 
   const requestedTab = location.hash.replace(/^#/, "");
   if (requestedTab && document.getElementById(requestedTab)) activateTab(requestedTab);
+}
+
+async function importLocalConfig() {
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "MAIL_IMPORT_LOCAL_CONFIG" });
+    if (!result?.ok) return;
+    db.settings = db.settings || {};
+    if (result.mailSettings) {
+      db.mailSettings = {
+        ...mailSettingsDefaults(),
+        ...(db.mailSettings || {}),
+        ...result.mailSettings
+      };
+    }
+    if (result.aiProvider?.apiBase && result.aiProvider?.model && result.aiProvider?.apiKey) {
+      const current = normalizeAiProviders(db.settings || {});
+      const rest = current.filter(provider => provider.id !== result.aiProvider.id);
+      db.settings = {
+        ...(db.settings || {}),
+        aiProviders: [result.aiProvider, ...rest].map((provider, index) => ({
+          ...provider,
+          order: index,
+          enabled: provider.enabled !== false
+        }))
+      };
+    }
+    await chrome.storage.local.set({
+      mailSettings: db.mailSettings,
+      settings: db.settings
+    });
+  } catch {
+    // 本地桥接未安装时保持手动配置路径。
+  }
 }
 
 function renderBasic() {
@@ -1789,6 +1824,7 @@ function renderAiProviders() {
         <span>${provider.enabled === false ? "已停用" : "已启用"}</span>
         <span>${safe(provider.model || "未填写模型名")}</span>
         <span>${safe(provider.apiBase || "未填写 API 地址")}</span>
+        <span>${safe(provider.apiKey || "未填写 API Key")}</span>
       </div>
     </div>
   `).join("") : '<div class="empty">暂无模型版本，点击右上角添加</div>';
@@ -1855,7 +1891,7 @@ function openAiProvider(index = -1) {
       <div class="field"><label>状态</label><select id="providerEnabled"><option value="true" ${provider.enabled !== false ? "selected" : ""}>启用</option><option value="false" ${provider.enabled === false ? "selected" : ""}>停用</option></select></div>
       <div class="field full-span"><label>OpenAI-compatible API 地址</label><input id="providerApiBase" value="${safe(provider.apiBase)}" placeholder="https://api.deepseek.com"></div>
       <div class="field"><label>模型名称</label><input id="providerModel" value="${safe(provider.model)}" placeholder="deepseek-chat"></div>
-      <div class="field"><label>API Key</label><input id="providerApiKey" type="password" autocomplete="off" value="${safe(provider.apiKey)}" placeholder="sk-..."></div>
+      <div class="field"><label>API Key</label><input id="providerApiKey" type="text" autocomplete="off" value="${safe(provider.apiKey)}" placeholder="sk-..."></div>
     </div>
     <div class="row"><button class="btn ghost" id="cancelModal">取消</button><button class="btn primary" id="saveAiProvider">保存模型</button></div>
   `;

@@ -8,6 +8,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from dotenv import dotenv_values
+
 from . import __version__
 from .config import Settings
 from .service import SyncService
@@ -15,6 +17,7 @@ from .state import StateStore
 
 ROOT = Path(__file__).resolve().parents[2]
 STATE_DB = ROOT / "data" / "state.db"
+ENV_FILE = ROOT / ".env"
 
 
 def read_message(stream: BinaryIO) -> dict[str, Any] | None:
@@ -42,10 +45,47 @@ def write_message(stream: BinaryIO, value: dict[str, Any]) -> None:
     stream.flush()
 
 
+def local_config() -> dict[str, Any]:
+    values = dotenv_values(ENV_FILE)
+    provider_name = values.get("LLM_PROVIDER_NAME") or values.get("LLM_MODEL") or "本地模型"
+    return {
+        "ok": True,
+        "mailSettings": {
+            "address": values.get("MAIL_ADDRESS") or "",
+            "authCode": values.get("MAIL_AUTH_CODE") or "",
+            "host": values.get("MAIL_HOST") or "imap.126.com",
+            "port": int(values.get("MAIL_PORT") or 993),
+            "folder": values.get("MAIL_FOLDER") or "INBOX",
+            "autoSync": True,
+            "dryRun": str(values.get("DRY_RUN") or "").lower() in {"1", "true", "yes", "on"},
+            "syncIntervalMinutes": int(values.get("POLL_INTERVAL_MINUTES") or 120),
+            "appId": values.get("FEISHU_APP_ID") or "",
+            "appSecret": values.get("FEISHU_APP_SECRET") or "",
+            "baseToken": values.get("FEISHU_BASE_TOKEN") or "",
+            "tableId": values.get("FEISHU_TABLE_ID") or "",
+            "companyField": values.get("FEISHU_COMPANY_FIELD") or "公司",
+            "noteField": values.get("FEISHU_NOTE_FIELD") or "note",
+            "assessmentLinkField": values.get("FEISHU_ASSESSMENT_LINK_FIELD") or "测评链接",
+            "ddlField": values.get("FEISHU_DDL_FIELD") or "ddl",
+        },
+        "aiProvider": {
+            "id": "local-env-default",
+            "name": provider_name,
+            "apiBase": values.get("LLM_BASE_URL") or "",
+            "model": values.get("LLM_MODEL") or "",
+            "apiKey": values.get("LLM_API_KEY") or "",
+            "enabled": True,
+            "order": 0,
+        },
+    }
+
+
 def handle(message: dict[str, Any]) -> dict[str, Any]:
     action = message.get("action")
     if action == "ping":
         return {"ok": True, "version": __version__}
+    if action == "localConfig":
+        return local_config()
     if action == "retryReview":
         state = StateStore(STATE_DB)
         try:

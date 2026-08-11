@@ -379,6 +379,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(error => sendResponse({ ok: false, error: error.message }));
     return true;
   }
+  if (message.type === "MAIL_IMPORT_LOCAL_CONFIG") {
+    sendNativeMessage({ action: "localConfig" })
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (message.type === "AI_MATCH_FIELDS") {
     aiMatchFields(message)
       .then(sendResponse)
