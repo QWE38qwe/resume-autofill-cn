@@ -243,13 +243,36 @@ class OpenAICompatibleExtractor:
     def __init__(self, settings: Settings):
         self.settings = settings
 
+    def _request(self, provider, body: dict) -> httpx.Response:
+        response: httpx.Response | None = None
+        for attempt in range(3):
+            try:
+                response = httpx.post(
+                    f"{provider.base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {provider.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={**body, "model": provider.model},
+                    timeout=self.settings.llm_timeout_seconds,
+                )
+                if response.status_code >= 500:
+                    response.raise_for_status()
+                return response
+            except (httpx.TransportError, httpx.HTTPStatusError):
+                if attempt == 2:
+                    raise
+                time.sleep(2**attempt)
+        if response is None:
+            raise RuntimeError("LLM request did not return a response")
+        return response
+
     def extract(self, message: ParsedEmail) -> Extraction:
         rule_stage, _ = classify_explicit_invitation(message)
         if not rule_stage:
             return Extraction(is_recruitment=False, confidence=95)
 
         body = {
-            "model": self.settings.llm_model,
             "temperature": 0,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -263,28 +286,23 @@ class OpenAICompatibleExtractor:
                 },
             ],
         }
-        response: httpx.Response | None = None
-        for attempt in range(3):
+
+        errors: list[str] = []
+        retryable_status = {401, 402, 403, 408, 409, 429}
+        for provider in self.settings.llm_providers:
             try:
-                response = httpx.post(
-                    f"{self.settings.llm_base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.settings.llm_api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=body,
-                    timeout=self.settings.llm_timeout_seconds,
-                )
-                if response.status_code >= 500:
-                    response.raise_for_status()
+                response = self._request(provider, body)
+                response.raise_for_status()
                 break
-            except (httpx.TransportError, httpx.HTTPStatusError):
-                if attempt == 2:
+            except httpx.HTTPStatusError as error:
+                errors.append(f"{provider.name}: {error}")
+                if error.response.status_code not in retryable_status:
                     raise
-                time.sleep(2**attempt)
-        if response is None:
-            raise RuntimeError("LLM request did not return a response")
-        response.raise_for_status()
+            except httpx.TransportError as error:
+                errors.append(f"{provider.name}: {error}")
+        else:
+            raise RuntimeError(f"All LLM providers failed: {'; '.join(errors)}")
+
         data = _json_object(response.json()["choices"][0]["message"]["content"])
         category = data.get("category")
         if category not in CATEGORIES:

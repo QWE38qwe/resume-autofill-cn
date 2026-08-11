@@ -23,6 +23,14 @@ def _bool(name: str, default: bool = False) -> bool:
 
 
 @dataclass(frozen=True)
+class LlmProvider:
+    name: str
+    base_url: str
+    api_key: str
+    model: str
+
+
+@dataclass(frozen=True)
 class Settings:
     mail_address: str
     mail_auth_code: str
@@ -33,6 +41,7 @@ class Settings:
     llm_base_url: str
     llm_api_key: str
     llm_model: str
+    llm_providers: tuple[LlmProvider, ...]
     llm_timeout_seconds: float
     feishu_app_id: str
     feishu_app_secret: str
@@ -57,6 +66,12 @@ class Settings:
         mail_auth_code = (
             _required("MAIL_AUTH_CODE") if require_mail else os.getenv("MAIL_AUTH_CODE", "")
         )
+        primary_provider = LlmProvider(
+            name=os.getenv("LLM_PROVIDER_NAME", os.getenv("LLM_MODEL", "默认模型")),
+            base_url=_required("LLM_BASE_URL").rstrip("/"),
+            api_key=_required("LLM_API_KEY"),
+            model=_required("LLM_MODEL"),
+        )
         return cls(
             mail_address=mail_address,
             mail_auth_code=mail_auth_code,
@@ -64,9 +79,10 @@ class Settings:
             mail_port=int(os.getenv("MAIL_PORT", "993")),
             mail_folder=os.getenv("MAIL_FOLDER", "INBOX"),
             mail_lookback_days=int(os.getenv("MAIL_LOOKBACK_DAYS", "7")),
-            llm_base_url=_required("LLM_BASE_URL").rstrip("/"),
-            llm_api_key=_required("LLM_API_KEY"),
-            llm_model=_required("LLM_MODEL"),
+            llm_base_url=primary_provider.base_url,
+            llm_api_key=primary_provider.api_key,
+            llm_model=primary_provider.model,
+            llm_providers=(primary_provider,),
             llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "60")),
             feishu_app_id=_required("FEISHU_APP_ID"),
             feishu_app_secret=_required("FEISHU_APP_SECRET"),
@@ -96,6 +112,27 @@ class Settings:
                 raise ValueError(f"缺少配置：{label}")
             return value
 
+        providers = []
+        for index, provider in enumerate(ai.get("providers") or []):
+            base_url = str(provider.get("apiBase") or "").strip().rstrip("/")
+            api_key = str(provider.get("apiKey") or "").strip()
+            model = str(provider.get("model") or "").strip()
+            if base_url and api_key and model:
+                providers.append(LlmProvider(
+                    name=str(provider.get("name") or model or f"模型 {index + 1}"),
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                ))
+        if not providers:
+            providers.append(LlmProvider(
+                name=str(ai.get("name") or ai.get("model") or "默认模型"),
+                base_url=required(ai, "apiBase", "AI API 地址").rstrip("/"),
+                api_key=required(ai, "apiKey", "AI API Key"),
+                model=required(ai, "model", "AI 模型"),
+            ))
+        primary_provider = providers[0]
+
         return cls(
             mail_address=required(mail, "address", "邮箱地址"),
             mail_auth_code=required(mail, "authCode", "邮箱客户端授权码"),
@@ -103,9 +140,10 @@ class Settings:
             mail_port=int(mail.get("port") or 993),
             mail_folder=str(mail.get("folder") or "INBOX").strip(),
             mail_lookback_days=7,
-            llm_base_url=required(ai, "apiBase", "AI API 地址").rstrip("/"),
-            llm_api_key=required(ai, "apiKey", "AI API Key"),
-            llm_model=required(ai, "model", "AI 模型"),
+            llm_base_url=primary_provider.base_url,
+            llm_api_key=primary_provider.api_key,
+            llm_model=primary_provider.model,
+            llm_providers=tuple(providers),
             llm_timeout_seconds=float(ai.get("timeoutSeconds") or 60),
             feishu_app_id=required(feishu, "appId", "飞书 App ID"),
             feishu_app_secret=required(feishu, "appSecret", "飞书 App Secret"),

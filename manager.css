@@ -674,6 +674,13 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .parsed-work textarea { min-height: 150px; }
 .bullet-hint { margin-top: 5px; color: var(--caption); font-size: 11px; }
 
+.ai-provider-list { display: grid; gap: 10px; margin-top: 14px; }
+.ai-provider-card { padding: 14px 15px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
+.ai-provider-card.disabled { opacity: .58; background: #f8f8f3; }
+.ai-provider-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; color: var(--caption); font-size: 11px; }
+.ai-provider-meta span { max-width: 100%; overflow: hidden; padding: 3px 7px; border-radius: 999px; background: var(--accent-pale); text-overflow: ellipsis; white-space: nowrap; }
+.ai-provider-order { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; margin-right: 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 800; }
+
 .mail-hero {
   position: relative;
   display: flex;

@@ -11,6 +11,46 @@ function safeAttr(value) {
   return safe(value).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+function normalizeAiProviders(settings = {}) {
+  const providers = Array.isArray(settings.aiProviders) ? settings.aiProviders : [];
+  const normalized = providers
+    .map((provider, index) => ({
+      id: provider.id || crypto.randomUUID(),
+      name: String(provider.name || provider.model || `模型 ${index + 1}`).trim(),
+      apiBase: String(provider.apiBase || "").trim(),
+      model: String(provider.model || "").trim(),
+      apiKey: String(provider.apiKey || "").trim(),
+      enabled: provider.enabled !== false,
+      order: Number.isFinite(Number(provider.order)) ? Number(provider.order) : index
+    }))
+    .filter(provider => provider.apiBase || provider.model || provider.apiKey);
+
+  if (!normalized.length && settings.apiKey) {
+    normalized.push({
+      id: "legacy-default",
+      name: settings.model || "默认模型",
+      apiBase: settings.apiBase || "https://api.deepseek.com",
+      model: settings.model || "deepseek-chat",
+      apiKey: settings.apiKey,
+      enabled: true,
+      order: 0
+    });
+  }
+
+  return normalized
+    .sort((left, right) => left.order - right.order)
+    .map((provider, index) => ({ ...provider, order: index }));
+}
+
+function activeAiProviders(settings = db.settings || {}) {
+  return normalizeAiProviders(settings)
+    .filter(provider => provider.enabled && provider.apiBase && provider.model && provider.apiKey);
+}
+
+function isAiConfigured(settings = db.settings || {}) {
+  return activeAiProviders(settings).length > 0;
+}
+
 const schemas = {
   education: [
     ["school", "学校"], ["college", "学院"], ["major", "专业"], ["level", "学历"],
@@ -163,14 +203,16 @@ async function init() {
 
   $("#hobbiesText").value = db.hobbies || "";
   const settings = db.settings || {};
-  $("#apiBase").value = settings.apiBase || "https://api.deepseek.com";
-  $("#model").value = settings.model || "deepseek-chat";
-  $("#apiKey").value = settings.apiKey || "";
+  settings.aiProviders = normalizeAiProviders(settings);
+  settings.apiConfigured = isAiConfigured(settings);
+  db.settings = settings;
+  await chrome.storage.local.set({ settings });
   if (!Array.isArray(settings.aiRules)) {
     settings.aiRules = defaultAiRules.map(rule => ({ ...rule }));
     db.settings = settings;
     await chrome.storage.local.set({ settings });
   }
+  renderAiProviders();
   renderAiRules();
 
   const requestedTab = location.hash.replace(/^#/, "");
@@ -1074,10 +1116,10 @@ function renderMailSettings() {
   $("#mailAutoSync").checked = Boolean(settings.autoSync);
   $("#mailDryRun").checked = Boolean(settings.dryRun);
 
-  const ai = db.settings || {};
-  $("#mailAiSummary").textContent = ai.apiKey
-    ? `共用 ${ai.model || "已配置模型"} · ${ai.apiBase || "自定义 API"}`
-    : "尚未配置 AI 服务，邮件同步前请先完成设置。";
+  const providers = activeAiProviders();
+  $("#mailAiSummary").textContent = providers.length
+    ? `共用 ${providers.length} 个启用模型 · 优先 ${providers[0].name || providers[0].model}`
+    : "尚未启用 AI 模型版本，邮件同步前请先完成设置。";
   $("#mailInstallCommand").textContent =
     `./native-host/install.sh ${chrome.runtime.id}`;
   updateBridgeState("idle", "检测本地桥接");
@@ -1229,8 +1271,7 @@ $("#syncMailNow").addEventListener("click", async () => {
   button.textContent = "同步中…";
   try {
     const mailSettings = await persistMailSettings(false);
-    const ai = db.settings || {};
-    if (!ai.apiKey) throw new Error("请先在设置中配置 AI API Key");
+    if (!activeAiProviders().length) throw new Error("请先在设置中启用至少一个 AI 模型版本");
     const result = await chrome.runtime.sendMessage({
       type: "MAIL_SYNC",
       dryRun: Boolean(mailSettings.dryRun)
@@ -1293,18 +1334,15 @@ function setParseStatus(message, state = "") {
   node.className = `parse-status ${state}`.trim();
 }
 
-function configuredSettings() {
-  const settings = db.settings || {};
-  return {
-    apiBase: settings.apiBase || "https://api.deepseek.com",
-    model: settings.model || "deepseek-chat",
-    apiKey: settings.apiKey || ""
-  };
-}
-
 async function ensureApiPermission(apiBase) {
   const pattern = `${new URL(apiBase).origin}/*`;
   return chrome.permissions.request({ origins: [pattern] });
+}
+
+async function ensureProviderPermissions(providers) {
+  const origins = [...new Set(providers.map(provider => `${new URL(provider.apiBase).origin}/*`))];
+  if (!origins.length) return true;
+  return chrome.permissions.request({ origins });
 }
 
 $("#parseResume").addEventListener("click", async () => {
@@ -1314,22 +1352,22 @@ $("#parseResume").addEventListener("click", async () => {
     return;
   }
 
-  const settings = configuredSettings();
-  if (!settings.apiKey) {
-    setParseStatus("请先在“设置”中填写 API Key，再执行解析", "error");
+  const providers = activeAiProviders();
+  if (!providers.length) {
+    setParseStatus("请先在“设置”中启用至少一个模型版本，再执行解析", "error");
     return;
   }
 
   const button = $("#parseResume");
   button.disabled = true;
   try {
-    const permitted = await ensureApiPermission(settings.apiBase);
+    const permitted = await ensureProviderPermissions(providers);
     if (!permitted) throw new Error("未获得 AI 服务域名的访问权限");
     setParseStatus("正在本地读取简历文本…");
     const text = await extractResumeText(file);
     if (text.trim().length < 30) throw new Error("没有读取到足够的简历文本，请确认文件不是扫描图片");
     setParseStatus(`已读取 ${text.length.toLocaleString()} 个字符，正在逐条提取实习经历…`);
-    parsedDraft = await parseInternships(text, file.name, settings);
+    parsedDraft = await parseInternships(text, file.name, providers);
     renderParsedDraft();
     setParseStatus(`解析完成：识别到 ${parsedDraft.internships.length} 段实习经历，请逐条核对原文`, "success");
   } catch (error) {
@@ -1421,7 +1459,43 @@ function chatEndpoint(apiBase) {
   return `${base}/chat/completions`;
 }
 
-async function parseInternships(resumeText, fileName, settings) {
+function shouldFallbackAi(error) {
+  if (error?.retryable) return true;
+  const status = Number(error?.status || 0);
+  return status === 401 || status === 402 || status === 403 || status === 408 ||
+    status === 409 || status === 429 || status >= 500;
+}
+
+async function requestInternshipParse(provider, body) {
+  let response;
+  try {
+    response = await fetch(chatEndpoint(provider.apiBase), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${provider.apiKey}`
+      },
+      body: JSON.stringify({ ...body, model: provider.model })
+    });
+  } catch (error) {
+    error.retryable = true;
+    throw error;
+  }
+
+  if (!response.ok) {
+    const bodyText = await response.text();
+    const error = new Error(`AI 服务请求失败（${response.status}）：${bodyText.slice(0, 180)}`);
+    error.status = response.status;
+    throw error;
+  }
+
+  const payload = await response.json();
+  const content = payload.choices?.[0]?.message?.content;
+  if (!content) throw new Error("AI 服务没有返回解析结果");
+  return content;
+}
+
+async function parseInternships(resumeText, fileName, providers) {
   const systemPrompt = `你是简历信息抽取器。只提取“实习经历”或明确属于实习的工作经历，禁止总结、润色、改写、合并或遗漏原文。
 
 输出必须是一个 JSON 对象，结构如下：
@@ -1449,31 +1523,27 @@ async function parseInternships(resumeText, fileName, settings) {
 5. 不提取教育、校园、项目、论文、技能、证书、自我评价等其他部分。
 6. 不确定的字段使用空字符串，不得编造。只返回 JSON。`;
 
-  const response = await fetch(chatEndpoint(settings.apiBase), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${settings.apiKey}`
-    },
-    body: JSON.stringify({
-      model: settings.model,
-      temperature: 0,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: `文件名：${fileName}\n\n简历全文：\n${resumeText.slice(0, 60000)}` }
-      ]
-    })
-  });
+  const body = {
+    temperature: 0,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `文件名：${fileName}\n\n简历全文：\n${resumeText.slice(0, 60000)}` }
+    ]
+  };
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`AI 服务请求失败（${response.status}）：${body.slice(0, 180)}`);
+  const errors = [];
+  let content = "";
+  for (const provider of providers) {
+    try {
+      content = await requestInternshipParse(provider, body);
+      break;
+    } catch (error) {
+      errors.push(`${provider.name || provider.model}: ${error.message || error}`);
+      if (!shouldFallbackAi(error)) throw error;
+    }
   }
-
-  const payload = await response.json();
-  const content = payload.choices?.[0]?.message?.content;
-  if (!content) throw new Error("AI 服务没有返回解析结果");
+  if (!content) throw new Error(`所有启用模型均不可用：${errors.join("；")}`);
   const json = parseJsonContent(content);
   const internships = Array.isArray(json.internships) ? json.internships : [];
   if (!internships.length) throw new Error("未识别到实习经历，请确认简历中包含“实习经历”部分");
@@ -1615,6 +1685,144 @@ async function createVersionFromParsed() {
   $("#versionEditor").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+async function persistAiSettings() {
+  const providers = normalizeAiProviders(db.settings || {});
+  db.settings = {
+    ...(db.settings || {}),
+    aiProviders: providers,
+    apiBase: providers[0]?.apiBase || "",
+    model: providers[0]?.model || "",
+    apiKey: providers[0]?.apiKey || "",
+    apiConfigured: providers.some(provider =>
+      provider.enabled && provider.apiBase && provider.model && provider.apiKey
+    ),
+    aiRules: db.settings?.aiRules || defaultAiRules.map(rule => ({ ...rule }))
+  };
+  await chrome.storage.local.set({ settings: db.settings });
+}
+
+function renderAiProviders() {
+  const box = $("#aiProviderList");
+  if (!box) return;
+  const providers = normalizeAiProviders(db.settings || {});
+  db.settings.aiProviders = providers;
+  box.className = "ai-provider-list";
+  box.innerHTML = providers.length ? providers.map((provider, index) => `
+    <div class="ai-provider-card ${provider.enabled === false ? "disabled" : ""}">
+      <div class="record-title">
+        <strong><span class="ai-provider-order">${index + 1}</span>${safe(provider.name || provider.model || "未命名模型")}</strong>
+        <div class="record-actions">
+          <button class="btn ghost small" data-provider-up="${index}" ${index === 0 ? "disabled" : ""}>上移</button>
+          <button class="btn ghost small" data-provider-down="${index}" ${index === providers.length - 1 ? "disabled" : ""}>下移</button>
+          <button class="btn ghost small" data-provider-toggle="${index}">${provider.enabled === false ? "启用" : "停用"}</button>
+          <button class="btn ghost small" data-provider-edit="${index}">编辑</button>
+          <button class="btn ghost small danger-btn" data-provider-delete="${index}">删除</button>
+        </div>
+      </div>
+      <div class="ai-provider-meta">
+        <span>${provider.enabled === false ? "已停用" : "已启用"}</span>
+        <span>${safe(provider.model || "未填写模型名")}</span>
+        <span>${safe(provider.apiBase || "未填写 API 地址")}</span>
+      </div>
+    </div>
+  `).join("") : '<div class="empty">暂无模型版本，点击右上角添加</div>';
+
+  $$("[data-provider-up]").forEach(button => {
+    button.onclick = async () => {
+      const index = Number(button.dataset.providerUp);
+      if (index <= 0) return;
+      [providers[index - 1], providers[index]] = [providers[index], providers[index - 1]];
+      db.settings.aiProviders = providers;
+      await persistAiSettings();
+      renderAiProviders();
+      renderMailSettings();
+    };
+  });
+  $$("[data-provider-down]").forEach(button => {
+    button.onclick = async () => {
+      const index = Number(button.dataset.providerDown);
+      if (index >= providers.length - 1) return;
+      [providers[index], providers[index + 1]] = [providers[index + 1], providers[index]];
+      db.settings.aiProviders = providers;
+      await persistAiSettings();
+      renderAiProviders();
+      renderMailSettings();
+    };
+  });
+  $$("[data-provider-toggle]").forEach(button => {
+    button.onclick = async () => {
+      const provider = providers[Number(button.dataset.providerToggle)];
+      provider.enabled = provider.enabled === false;
+      db.settings.aiProviders = providers;
+      await persistAiSettings();
+      renderAiProviders();
+      renderMailSettings();
+    };
+  });
+  $$("[data-provider-edit]").forEach(button => {
+    button.onclick = () => openAiProvider(Number(button.dataset.providerEdit));
+  });
+  $$("[data-provider-delete]").forEach(button => {
+    button.onclick = async () => {
+      const index = Number(button.dataset.providerDelete);
+      if (!confirm(`确认删除模型版本“${providers[index].name || providers[index].model}”？`)) return;
+      providers.splice(index, 1);
+      db.settings.aiProviders = providers;
+      await persistAiSettings();
+      renderAiProviders();
+      renderMailSettings();
+    };
+  });
+}
+
+function openAiProvider(index = -1) {
+  const providers = normalizeAiProviders(db.settings || {});
+  const provider = index < 0 ? {
+    enabled: true,
+    apiBase: "https://api.deepseek.com",
+    model: "deepseek-chat"
+  } : providers[index];
+  $("#modalBody").innerHTML = `
+    <div class="section-title">${index < 0 ? "添加" : "编辑"}模型版本</div>
+    <div class="modal-grid">
+      <div class="field"><label>版本名称</label><input id="providerName" value="${safe(provider.name)}" placeholder="例如：DeepSeek 主力"></div>
+      <div class="field"><label>状态</label><select id="providerEnabled"><option value="true" ${provider.enabled !== false ? "selected" : ""}>启用</option><option value="false" ${provider.enabled === false ? "selected" : ""}>停用</option></select></div>
+      <div class="field full-span"><label>OpenAI-compatible API 地址</label><input id="providerApiBase" value="${safe(provider.apiBase)}" placeholder="https://api.deepseek.com"></div>
+      <div class="field"><label>模型名称</label><input id="providerModel" value="${safe(provider.model)}" placeholder="deepseek-chat"></div>
+      <div class="field"><label>API Key</label><input id="providerApiKey" type="password" autocomplete="off" value="${safe(provider.apiKey)}" placeholder="sk-..."></div>
+    </div>
+    <div class="row"><button class="btn ghost" id="cancelModal">取消</button><button class="btn primary" id="saveAiProvider">保存模型</button></div>
+  `;
+  openModal();
+  $("#saveAiProvider").onclick = async () => {
+    const apiBase = $("#providerApiBase").value.trim() || "https://api.deepseek.com";
+    const model = $("#providerModel").value.trim();
+    const apiKey = $("#providerApiKey").value.trim();
+    if (!model) return $("#providerModel").focus();
+    if (!apiKey) return $("#providerApiKey").focus();
+    const permitted = await ensureProviderPermissions([{ apiBase }]);
+    if (!permitted) return alert("未获得该模型服务域名访问权限，无法保存");
+    const record = {
+      id: provider.id || crypto.randomUUID(),
+      name: $("#providerName").value.trim() || model,
+      apiBase,
+      model,
+      apiKey,
+      enabled: $("#providerEnabled").value === "true",
+      order: index < 0 ? providers.length : index
+    };
+    if (index < 0) providers.push(record);
+    else providers[index] = record;
+    db.settings.aiProviders = providers;
+    await persistAiSettings();
+    closeModal();
+    renderAiProviders();
+    renderMailSettings();
+  };
+}
+
+$("#addAiProvider").addEventListener("click", () => openAiProvider());
+
 function renderAiRules() {
   const box = $("#aiRuleList");
   if (!box) return;
@@ -1692,24 +1900,5 @@ function openAiRule(index = -1) {
 }
 
 $("#addAiRule").addEventListener("click", () => openAiRule());
-
-$("#saveSettings").addEventListener("click", async () => {
-  const apiBase = $("#apiBase").value.trim() || "https://api.deepseek.com";
-  const apiKey = $("#apiKey").value.trim();
-  if (apiKey) {
-    const permitted = await ensureApiPermission(apiBase);
-    if (!permitted) return alert("未获得 AI 服务域名访问权限，无法启用网页字段匹配");
-  }
-  db.settings = {
-    ...(db.settings || {}),
-    apiBase,
-    model: $("#model").value.trim() || "deepseek-chat",
-    apiKey,
-    apiConfigured: Boolean(apiKey),
-    aiRules: db.settings?.aiRules || defaultAiRules.map(rule => ({ ...rule }))
-  };
-  await chrome.storage.local.set({ settings: db.settings });
-  alert("AI 设置已保存");
-});
 
 init();

@@ -626,7 +626,13 @@ function describeTargets(targets) {
 }
 
 async function requestAiMappings(targets, data, customFields, settings) {
-  if (!settings?.apiKey || !targets.length) return { mappings: new Map(), source: "disabled", error: "" };
+  const providers = Array.isArray(settings?.aiProviders) ? settings.aiProviders : [];
+  const hasProvider = providers.some(provider =>
+    provider.enabled !== false && provider.apiBase && provider.model && provider.apiKey
+  );
+  if (!(hasProvider || settings?.apiKey) || !targets.length) {
+    return { mappings: new Map(), source: "disabled", error: "" };
+  }
   const candidates = availableCandidates(data, customFields, settings);
   if (!candidates.length) return { mappings: new Map(), source: "empty", error: "" };
   const fields = describeTargets(targets).filter(field => field.label);
@@ -1813,8 +1819,8 @@ async function fillBaseFields(data, customFields, settings, handled, targets, ai
       items.push({ label: `${match.label}：未找到可选项`, state: "yellow", status: "未匹配" });
     }
   }
-  if (aiResult.source === "deepseek" || aiResult.source === "cache") {
-    items.unshift({ label: `DeepSeek 已参与网页字段匹配（${aiResult.source === "cache" ? "使用缓存" : "实时调用"}）`, state: "green", status: "AI匹配" });
+  if (aiResult.source && aiResult.source !== "disabled" && aiResult.source !== "error") {
+    items.unshift({ label: `AI 模型已参与网页字段匹配（${aiResult.source === "cache" ? "使用缓存" : aiResult.source}）`, state: "green", status: "AI匹配" });
   } else if (aiResult.error) {
     items.unshift({ label: `AI 字段匹配不可用：${aiResult.error}`, state: "yellow", status: "未匹配" });
   }
@@ -1854,9 +1860,7 @@ function mergeScanResults(current, frameResults) {
     count: summary.count + (result.count || 0),
     total: summary.total + (result.total || 0),
     aiMatched: summary.aiMatched + (result.aiMatched || 0),
-    aiSource: summary.aiSource === "deepseek" || result.aiSource === "deepseek"
-      ? "deepseek"
-      : summary.aiSource === "cache" || result.aiSource === "cache" ? "cache" : summary.aiSource,
+    aiSource: summary.aiSource || result.aiSource || "",
     aiError: summary.aiError || result.aiError || ""
   }), { ...current });
 }

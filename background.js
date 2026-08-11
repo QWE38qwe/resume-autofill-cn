@@ -25,6 +25,8 @@ chrome.runtime.onInstalled.addListener(async () => {
     ...(current.settings || {})
   };
   if (!Array.isArray(settings.aiRules)) settings.aiRules = defaultAiRules;
+  settings.aiProviders = normalizeAiProviders(settings);
+  settings.apiConfigured = activeAiProviders(settings).length > 0;
   payload.settings = settings;
   payload.mailSettings = {
     host: "imap.126.com",
@@ -49,6 +51,91 @@ function chatEndpoint(apiBase) {
   return /\/chat\/completions$/i.test(base) ? base : `${base}/chat/completions`;
 }
 
+function normalizeAiProviders(settings = {}) {
+  const providers = Array.isArray(settings.aiProviders) ? settings.aiProviders : [];
+  const normalized = providers
+    .map((provider, index) => ({
+      id: provider.id || `provider-${index}`,
+      name: String(provider.name || provider.model || `模型 ${index + 1}`).trim(),
+      apiBase: String(provider.apiBase || "").trim(),
+      model: String(provider.model || "").trim(),
+      apiKey: String(provider.apiKey || "").trim(),
+      enabled: provider.enabled !== false,
+      order: Number.isFinite(Number(provider.order)) ? Number(provider.order) : index
+    }))
+    .filter(provider => provider.apiBase && provider.model && provider.apiKey)
+    .sort((left, right) => left.order - right.order);
+
+  if (!normalized.length && settings.apiKey) {
+    normalized.push({
+      id: "legacy-default",
+      name: settings.model || "默认模型",
+      apiBase: settings.apiBase || "https://api.deepseek.com",
+      model: settings.model || "deepseek-chat",
+      apiKey: settings.apiKey,
+      enabled: true,
+      order: 0
+    });
+  }
+
+  return normalized;
+}
+
+function activeAiProviders(settings = {}) {
+  return normalizeAiProviders(settings).filter(provider => provider.enabled);
+}
+
+function shouldFallbackAi(error) {
+  if (error?.retryable) return true;
+  const status = Number(error?.status || 0);
+  return status === 401 || status === 402 || status === 403 || status === 408 ||
+    status === 409 || status === 429 || status >= 500;
+}
+
+async function requestChatCompletion(provider, body) {
+  let response;
+  try {
+    response = await fetch(chatEndpoint(provider.apiBase), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${provider.apiKey}`
+      },
+      body: JSON.stringify({ ...body, model: provider.model })
+    });
+  } catch (error) {
+    error.retryable = true;
+    throw error;
+  }
+
+  if (!response.ok) {
+    const bodyText = await response.text();
+    const error = new Error(`AI 服务请求失败（${response.status}）：${bodyText.slice(0, 160)}`);
+    error.status = response.status;
+    throw error;
+  }
+
+  return response.json();
+}
+
+async function withAiFallback(settings, body) {
+  const providers = activeAiProviders(settings);
+  if (!providers.length) throw new Error("未配置启用的 AI 模型版本");
+
+  const errors = [];
+  for (const provider of providers) {
+    try {
+      const payload = await requestChatCompletion(provider, body);
+      return { payload, provider };
+    } catch (error) {
+      errors.push(`${provider.name || provider.model}: ${error.message || error}`);
+      if (!shouldFallbackAi(error)) throw error;
+    }
+  }
+
+  throw new Error(`所有启用模型均不可用：${errors.join("；")}`);
+}
+
 function parseJsonContent(content) {
   const source = String(content || "").replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
   const start = source.indexOf("{");
@@ -59,7 +146,7 @@ function parseJsonContent(content) {
 
 async function aiMatchFields(message) {
   const { settings = {}, aiFieldMappings = {} } = await chrome.storage.local.get(["settings", "aiFieldMappings"]);
-  if (!settings.apiKey) return { error: "未配置 AI API Key" };
+  if (!activeAiProviders(settings).length) return { error: "未配置启用的 AI 模型版本" };
 
   const fields = Array.isArray(message.fields) ? message.fields.slice(0, 120) : [];
   const candidates = Array.isArray(message.candidates) ? message.candidates.slice(0, 120) : [];
@@ -105,28 +192,14 @@ ${JSON.stringify(fields)}
 候选标准字段：
 ${JSON.stringify(candidates)}`;
 
-  const response = await fetch(chatEndpoint(settings.apiBase), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${settings.apiKey}`
-    },
-    body: JSON.stringify({
-      model: settings.model || "deepseek-chat",
-      temperature: 0,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: "你只负责结构化字段映射，严格遵守候选 key 白名单。固定回答只能来自 rule: 规则，禁止推测用户事实或偏好。" },
-        { role: "user", content: prompt }
-      ]
-    })
+  const { payload, provider } = await withAiFallback(settings, {
+    temperature: 0,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: "你只负责结构化字段映射，严格遵守候选 key 白名单。固定回答只能来自 rule: 规则，禁止推测用户事实或偏好。" },
+      { role: "user", content: prompt }
+    ]
   });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`AI 字段匹配请求失败（${response.status}）：${body.slice(0, 160)}`);
-  }
-  const payload = await response.json();
   const parsed = parseJsonContent(payload.choices?.[0]?.message?.content);
   const allowedKeys = new Set(candidates.map(candidate => candidate.key));
   const fieldIds = new Set(fields.map(field => field.fieldId));
@@ -143,7 +216,7 @@ ${JSON.stringify(candidates)}`;
   const entries = Object.entries(aiFieldMappings);
   const trimmed = entries.length > 30 ? Object.fromEntries(entries.slice(-30)) : aiFieldMappings;
   await chrome.storage.local.set({ aiFieldMappings: trimmed });
-  return { matches, source: "deepseek" };
+  return { matches, source: provider.name || provider.model || "ai" };
 }
 
 function sendNativeMessage(payload) {
@@ -171,6 +244,8 @@ async function scheduleMailSync(mailSettings = {}) {
 }
 
 function mailPayload(mailSettings, settings, dryRun) {
+  const providers = activeAiProviders(settings);
+  const primary = providers[0] || {};
   return {
     action: "sync",
     dryRun: Boolean(dryRun),
@@ -183,9 +258,15 @@ function mailPayload(mailSettings, settings, dryRun) {
       folder: mailSettings.folder || "INBOX"
     },
     ai: {
-      apiBase: settings.apiBase,
-      apiKey: settings.apiKey,
-      model: settings.model,
+      apiBase: primary.apiBase,
+      apiKey: primary.apiKey,
+      model: primary.model,
+      providers: providers.map(provider => ({
+        name: provider.name,
+        apiBase: provider.apiBase,
+        apiKey: provider.apiKey,
+        model: provider.model
+      })),
       timeoutSeconds: 60
     },
     feishu: {

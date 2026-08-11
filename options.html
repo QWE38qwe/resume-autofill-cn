@@ -134,13 +134,21 @@
 </section>
 <section id="api" class="section">
   <div class="surface settings-card">
-    <div class="surface-head"><div><span class="section-kicker">模型服务</span><h2>AI 解析与匹配</h2><p>用于简历实习经历结构化解析和招聘网页字段匹配，配置仅保存在本机。</p></div></div>
-    <div class="form-grid">
-      <div class="field full-span"><label for="apiBase">DeepSeek 兼容 API 地址</label><input id="apiBase" placeholder="https://api.deepseek.com"></div>
-      <div class="field"><label for="model">模型名称</label><input id="model" placeholder="deepseek-chat"></div>
-      <div class="field"><label for="apiKey">API Key</label><input id="apiKey" type="password" autocomplete="off" placeholder="sk-..."></div>
+    <div class="surface-head">
+      <div>
+        <span class="section-kicker">模型服务</span>
+        <h2>AI 解析与匹配</h2>
+        <p>支持配置多个 OpenAI-compatible 模型版本，按顺序启用和自动降级。</p>
+      </div>
+      <button class="btn secondary" id="addAiProvider">添加模型版本</button>
     </div>
-    <div class="settings-actions"><span class="muted">解析时会申请对应 API 域名的访问权限</span><button class="btn primary" id="saveSettings">保存设置</button></div>
+    <div class="rule-principles">
+      <span>按列表顺序调用</span>
+      <span>可单独启用 / 停用</span>
+      <span>限流或额度不足自动尝试下一个</span>
+    </div>
+    <div id="aiProviderList"></div>
+    <div class="settings-actions"><span class="muted">保存模型时会申请对应 API 域名的访问权限；API Key 仅保存在本机。</span></div>
   </div>
   <div class="surface settings-card">
     <div class="surface-head">

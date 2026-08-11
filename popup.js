@@ -28,6 +28,14 @@ function latestByCompany(records) {
     .map(item => item.record);
 }
 
+function hasActiveAiProvider(settings = {}) {
+  const providers = Array.isArray(settings.aiProviders) ? settings.aiProviders : [];
+  if (providers.some(provider =>
+    provider.enabled !== false && provider.apiBase && provider.model && provider.apiKey
+  )) return true;
+  return Boolean(settings.apiConfigured || (settings.apiKey && settings.model));
+}
+
 function pageHost(url) {
   try {
     return new URL(url).hostname.replace(/^www\./, "") || "当前页面";
@@ -67,7 +75,7 @@ async function init() {
     updateResumeMeta();
   };
 
-  const apiConfigured = Boolean(settings.apiConfigured || (settings.apiKey && settings.model));
+  const apiConfigured = hasActiveAiProvider(settings);
   $("#apiStatus").textContent = apiConfigured ? "已配置" : "未配置";
   $("#apiStatus").className = `pill ${apiConfigured ? "green" : "gray"}`;
   $("#site").textContent = pageHost(tab.url);
@@ -101,7 +109,7 @@ async function send(type, payload = {}) {
 async function scan() {
   const result = await send("SCAN_FORM");
   $("#detected").textContent = result?.total != null ? `${result.count}/${result.total}` : (result?.count ?? 0);
-  if (result?.aiSource === "deepseek" || result?.aiSource === "cache") {
+  if (result?.aiSource && result.aiSource !== "disabled" && result.aiSource !== "error") {
     $("#apiStatus").textContent = `AI 匹配 ${result.aiMatched || 0}`;
     $("#apiStatus").className = "pill green";
   } else if (result?.aiError) {
