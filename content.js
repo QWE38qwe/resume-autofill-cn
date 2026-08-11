@@ -54,6 +54,7 @@ const FIELD_DEFS = {
   recruitmentSource: ["如何了解到招聘信息", "如何了解到校招信息", "如何了解到讯飞校招信息", "招聘信息来源", "获知渠道", "应聘渠道", "申请渠道", "source of application", "how did you hear about us"],
   relativesAtCompany: ["是否有亲属在本公司", "亲属任职情况", "relative employed", "relatives at company"],
   drivingLicense: ["是否有驾驶证", "驾驶证", "驾照"],
+  avatarFile: ["头像", "照片", "证件照", "个人照片", "免冠照", "生活照", "avatar", "photo", "portrait", "headshot", "profile photo"],
   resumeAttachment: ["简历附件", "上传简历", "resume", "cv", "attach resume"],
   school: ["学校名称", "毕业院校", "就读学校", "院校名称", "学校"],
   college: ["学院名称", "学院"],
@@ -263,7 +264,11 @@ function controls(root = document) {
 
 function fileControls(root = document) {
   return queryAllDeep(root, "input[type=file]")
-    .filter(element => isVisible(element) && !element.disabled);
+    .filter(element => {
+      if (element.disabled) return false;
+      const text = normalizeText(`${element.accept || ""} ${labelOf(element)} ${nearbyTextOf(element)}`);
+      return isVisible(element) || /image|头像|照片|证件照|photo|avatar|portrait|headshot/.test(text);
+    });
 }
 
 function radioGroups(root = document) {
@@ -672,6 +677,12 @@ function matchControl(element, customFields = []) {
       best = { key, label: match.alias, confidence: match.score };
     }
   });
+  if (!best && element instanceof HTMLInputElement && element.type === "file") {
+    const text = normalizeText(`${element.accept || ""} ${label} ${nearbyTextOf(element)}`);
+    if (/image|头像|照片|证件照|photo|avatar|portrait|headshot/.test(text)) {
+      best = { key: "avatarFile", label: "头像照片", confidence: 86 };
+    }
+  }
   return best;
 }
 
@@ -717,6 +728,32 @@ function setNativeValue(element, value) {
     element.dispatchEvent(new Event(type, { bubbles: true }));
   });
   return true;
+}
+
+function fileFromStoredAvatar(value) {
+  if (!value?.dataUrl || !value?.name) return null;
+  const match = String(value.dataUrl).match(/^data:([^;,]+);base64,(.*)$/);
+  if (!match) return null;
+  const binary = atob(match[2]);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new File([bytes], value.name, {
+    type: value.type || match[1] || "image/jpeg",
+    lastModified: Date.parse(value.updatedAt || "") || Date.now()
+  });
+}
+
+function setFileInput(element, file) {
+  if (!(element instanceof HTMLInputElement) || element.type !== "file" || !file) return false;
+  const transfer = new DataTransfer();
+  transfer.items.add(file);
+  element.files = transfer.files;
+  ["input", "change"].forEach(type => {
+    element.dispatchEvent(new Event(type, { bubbles: true }));
+  });
+  return element.files?.length > 0;
 }
 
 function setSearchValue(element, value) {
@@ -1160,8 +1197,12 @@ function controlCurrentValue(element) {
 }
 
 async function fillControl(element, value, overwrite = false) {
-  if (value == null || String(value).trim() === "") return "empty";
-  if (element instanceof HTMLInputElement && element.type === "file") return "file";
+  if (value == null || (typeof value !== "object" && String(value).trim() === "")) return "empty";
+  if (element instanceof HTMLInputElement && element.type === "file") {
+    if (!overwrite && element.files?.length) return "skipped";
+    const file = fileFromStoredAvatar(value);
+    return setFileInput(element, file) ? "filled" : "file";
+  }
   if (componentType(element) === "option-group") {
     if (!overwrite && optionGroupHasValue(element)) return "skipped";
     const options = groupOptionNodes(element);
@@ -1764,6 +1805,7 @@ function flattened(personal, education, profile, skills = [], languages = []) {
     currentDepartment: personal.currentDepartment || latestWork.department || "",
     skillsSummary: skills.map(skill => skill.name).filter(Boolean).join("、"),
     languagesSummary: languages.map(language => language.language || language.exam).filter(Boolean).join("、"),
+    avatarFile: personal.avatarFile || null,
     resumeAttachment: profile?.attachment || personal.resumeAttachment || "",
     summary: profile?.summary || personal.summary || ""
   };
@@ -1777,6 +1819,12 @@ function mappedValue(key, data, customFields, settings = {}) {
     return ruleDefinitions(settings.aiRules || []).find(definition => definition.key === key)?.value;
   }
   return data[key];
+}
+
+function hasMappedValue(value) {
+  if (value == null) return false;
+  if (typeof value === "object") return Boolean(value.dataUrl || value.value);
+  return String(value).trim() !== "";
 }
 
 async function fillBaseFields(data, customFields, settings, handled, targets, aiResult) {
@@ -1801,14 +1849,15 @@ async function fillBaseFields(data, customFields, settings, handled, targets, ai
     if (!match) continue;
     handled.add(element);
     const value = mappedValue(match.key, data, customFields, settings);
-    if (value == null || String(value).trim() === "") {
+    if (!hasMappedValue(value)) {
       items.push({ label: `${match.label}：资料库暂无值`, state: "yellow", status: "未匹配" });
       continue;
     }
     const result = await fillControl(element, value, Boolean(settings.overwrite));
     if (result === "filled") {
       const source = match.key?.startsWith("rule:") ? "（AI 规则）" : match.ai ? "（AI 匹配）" : "";
-      items.push({ label: `${match.label}：已填写${source}`, state: match.confidence >= 82 ? "green" : "yellow", status: "已填写" });
+      const action = element instanceof HTMLInputElement && element.type === "file" ? "已上传" : "已填写";
+      items.push({ label: `${match.label}：${action}${source}`, state: match.confidence >= 82 ? "green" : "yellow", status: action });
     } else if (result === "skipped") {
       items.push({ label: `${match.label}：网页已有内容`, state: "gray", status: "跳过" });
     } else if (result === "readonly") {
@@ -1954,3 +2003,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   });
   return true;
 });
+
+if (location.hostname === "127.0.0.1" || location.hostname === "localhost") {
+  window.__jianfillTest = { scanCurrentFrame, fillCurrentFrame };
+}

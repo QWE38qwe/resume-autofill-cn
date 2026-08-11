@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Avatar Upload Fixture</title>
+</head>
+<body>
+  <h1>头像上传夹具</h1>
+  <label for="avatar">头像照片</label>
+  <input id="avatar" type="file" accept="image/png,image/jpeg">
+  <button id="run">运行夹具</button>
+  <pre id="result">not-run</pre>
+
+  <script>
+    const avatarDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    globalThis.chrome = {
+      storage: {
+        local: {
+          async get(keys) {
+            return {
+              personal: {
+                avatarFile: {
+                  name: "avatar.png",
+                  type: "image/png",
+                  size: 68,
+                  dataUrl: avatarDataUrl,
+                  updatedAt: new Date("2026-01-01T00:00:00Z").toISOString()
+                }
+              },
+              education: [],
+              projects: [],
+              languages: [],
+              skills: [],
+              awards: [],
+              papers: [],
+              certificates: [],
+              portfolio: [],
+              profiles: [],
+              activeProfileId: "",
+              settings: {},
+              customFields: []
+            };
+          },
+          async set() {}
+        }
+      },
+      runtime: {
+        onMessage: { addListener() {} },
+        sendMessage: async () => ({})
+      }
+    };
+  </script>
+  <script src="../content.js"></script>
+  <script>
+    document.getElementById("run").addEventListener("click", async () => {
+      const output = await window.__jianfillTest.fillCurrentFrame("full");
+      const file = document.getElementById("avatar").files[0];
+      document.getElementById("result").textContent = JSON.stringify({
+        fileName: file?.name || "",
+        fileType: file?.type || "",
+        fileCount: document.getElementById("avatar").files.length,
+        uploaded: output.items.some(item => item.status === "已上传"),
+        pass: file?.name === "avatar.png" &&
+          file?.type === "image/png" &&
+          output.items.some(item => item.status === "已上传")
+      }, null, 2);
+    });
+  </script>
+</body>
+</html>

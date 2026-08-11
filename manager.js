@@ -193,6 +193,7 @@ async function init() {
   });
 
   renderBasic();
+  renderAvatar();
   renderCustomFields();
   Object.keys(schemas).forEach(renderList);
   renderVersions();
@@ -234,6 +235,63 @@ function renderBasic() {
   `).join("");
 }
 
+function renderAvatar() {
+  const avatar = db.personal?.avatarFile;
+  $("#avatarPanel").innerHTML = `
+    <div class="avatar-panel">
+      <div class="avatar-preview">
+        ${avatar?.dataUrl ? `<img src="${safeAttr(avatar.dataUrl)}" alt="头像预览">` : "<span>暂无头像</span>"}
+      </div>
+      <div class="avatar-meta">
+        <strong>${safe(avatar?.name || "未上传头像")}</strong>
+        <small>支持 JPG、PNG、WebP，建议证件照比例，文件不超过 2.5MB。保存后会用于匹配招聘网站中的头像、照片、证件照上传控件。</small>
+        <div class="avatar-actions">
+          <label class="btn secondary" for="avatarFileInput">选择头像</label>
+          <input id="avatarFileInput" type="file" accept="image/jpeg,image/png,image/webp">
+          <span class="muted">${avatar?.updatedAt ? `更新于 ${safe(new Date(avatar.updatedAt).toLocaleString())}` : "数据仅保存在本机"}</span>
+        </div>
+      </div>
+    </div>
+  `;
+  $("#avatarFileInput").addEventListener("change", saveAvatarFile);
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("文件读取失败"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function saveAvatarFile(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+    alert("头像仅支持 JPG、PNG 或 WebP");
+    event.target.value = "";
+    return;
+  }
+  if (file.size > 2.5 * 1024 * 1024) {
+    alert("头像文件超过 2.5MB，请先压缩后再上传");
+    event.target.value = "";
+    return;
+  }
+  const dataUrl = await readFileAsDataUrl(file);
+  db.personal = db.personal || {};
+  db.personal.avatarFile = {
+    name: file.name,
+    type: file.type,
+    size: file.size,
+    dataUrl,
+    updatedAt: new Date().toISOString()
+  };
+  await chrome.storage.local.set({ personal: db.personal });
+  renderAvatar();
+  alert("头像已保存");
+}
+
 $("#saveBasic").addEventListener("click", async () => {
   db.personal = db.personal || {};
   $$("[data-basic]").forEach(input => {
@@ -241,6 +299,14 @@ $("#saveBasic").addEventListener("click", async () => {
   });
   await chrome.storage.local.set({ personal: db.personal });
   alert("个人资料已保存");
+});
+
+$("#removeAvatar").addEventListener("click", async () => {
+  if (!db.personal?.avatarFile) return;
+  if (!confirm("确认移除已保存头像？")) return;
+  delete db.personal.avatarFile;
+  await chrome.storage.local.set({ personal: db.personal });
+  renderAvatar();
 });
 
 function renderCustomFields() {

@@ -661,6 +661,15 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .parse-status.error { color: var(--danger); }
 .parse-status.success { color: var(--success); }
 
+.avatar-panel { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 16px; align-items: center; }
+.avatar-preview { display: grid; place-items: center; width: 96px; height: 120px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: #f7f7f2; color: var(--caption); font-size: 12px; text-align: center; }
+.avatar-preview img { width: 100%; height: 100%; object-fit: cover; }
+.avatar-meta { display: grid; gap: 8px; min-width: 0; }
+.avatar-meta strong { color: var(--ink); }
+.avatar-meta small { color: var(--caption); line-height: 1.6; }
+.avatar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.avatar-actions input[type="file"] { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+
 .parse-preview {
   margin-top: 8px;
   padding-top: 20px;
