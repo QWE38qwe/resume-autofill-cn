@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Hotjob work fixture</title>
+  <style>
+    body { font: 16px sans-serif; }
+    .resume-section { display: grid; grid-template-columns: 320px 1fr; gap: 24px; margin: 24px; }
+    .section-title { font-size: 26px; font-weight: 700; }
+    .form-item { margin: 14px 0; }
+    label { display: block; margin-bottom: 6px; font-weight: 600; }
+    input, select, textarea { width: 520px; box-sizing: border-box; padding: 8px; }
+  </style>
+</head>
+<body>
+  <section class="resume-section">
+    <aside>
+      <div class="section-title">校外实习或工作经历</div>
+    </aside>
+    <main class="work-form">
+      <div class="form-item">
+        <label>是否有相关经历<span>*</span></label>
+        <select id="hasWork">
+          <option value="">请选择</option>
+          <option value="是">是</option>
+          <option value="否">否</option>
+        </select>
+      </div>
+      <div class="form-item">
+        <label>开始时间<span>*</span></label>
+        <input id="start" placeholder="请选择开始时间">
+      </div>
+      <div class="form-item">
+        <label>结束时间<span>*</span></label>
+        <input id="end" placeholder="请选择结束时间">
+      </div>
+      <div class="form-item">
+        <label>企业名称<span>*</span></label>
+        <input id="company" placeholder="请填写企业名称">
+      </div>
+      <div class="form-item">
+        <label>所在部门<span>*</span></label>
+        <input id="department" placeholder="请填写所在部门">
+      </div>
+      <div class="form-item">
+        <label>职位名称<span>*</span></label>
+        <input id="position" placeholder="请填写职位名称">
+      </div>
+      <div class="form-item">
+        <label>工作职责<span>*</span></label>
+        <textarea id="description" placeholder="请填写工作职责"></textarea>
+      </div>
+    </main>
+  </section>
+
+  <button type="button" id="run-fixture">运行夹具</button>
+  <pre id="result">not-run</pre>
+
+  <script>
+    const fixtureStore = {
+      personal: {},
+      education: [],
+      profiles: [{
+        id: "fixture-profile",
+        name: "测试简历",
+        work: [{
+          company: "示例科技有限公司",
+          department: "产品部",
+          position: "产品实习生",
+          start: "2026-01",
+          end: "2026-03",
+          description: "负责用户调研与需求分析"
+        }]
+      }],
+      activeProfileId: "fixture-profile",
+      projects: [],
+      languages: [],
+      skills: [],
+      awards: [],
+      papers: [],
+      certificates: [],
+      portfolio: [],
+      customFields: [],
+      settings: {}
+    };
+
+    let contentListener;
+    window.chrome = {
+      storage: {
+        local: {
+          get: async keys => Object.fromEntries(keys.map(key => [key, fixtureStore[key]]))
+        }
+      },
+      runtime: {
+        sendMessage: async () => ({ matches: [], source: "disabled" }),
+        onMessage: {
+          addListener: listener => {
+            contentListener = listener;
+          }
+        }
+      }
+    };
+
+    window.runHotjobFixture = () => new Promise((resolve, reject) => {
+      if (!contentListener) {
+        reject(new Error("content listener not registered"));
+        return;
+      }
+      contentListener({ type: "FILL_FORM", mode: "full" }, {}, response => {
+        const result = {
+          response,
+          hasWork: document.querySelector("#hasWork").value,
+          start: document.querySelector("#start").value,
+          end: document.querySelector("#end").value,
+          company: document.querySelector("#company").value,
+          department: document.querySelector("#department").value,
+          position: document.querySelector("#position").value,
+          description: document.querySelector("#description").value
+        };
+        result.pass = result.hasWork === "是" &&
+          result.start.includes("2026") &&
+          result.end.includes("2026") &&
+          result.company === "示例科技有限公司" &&
+          result.department === "产品部" &&
+          result.position === "产品实习生" &&
+          result.description === "负责用户调研与需求分析";
+        document.querySelector("#result").textContent = JSON.stringify(result, null, 2);
+        resolve(result);
+      });
+    });
+
+    document.querySelector("#run-fixture").addEventListener("click", async () => {
+      try {
+        await window.runHotjobFixture();
+      } catch (error) {
+        document.querySelector("#result").textContent = JSON.stringify({ error: error.message });
+      }
+    });
+  </script>
+  <script src="../content.js"></script>
+</body>
+</html>

@@ -95,15 +95,16 @@ const REPEAT_DEFS = [
   },
   {
     type: "work",
-    titles: ["实习经历", "实习经验", "工作经历", "工作经验", "工作信息", "任职经历", "work experience", "employment history", "experience"],
-    anchors: ["公司名称", "单位名称", "实习单位", "任职公司", "公司", "company", "employer", "organization"],
+    titles: ["实习经历", "实习经验", "工作经历", "工作经验", "工作信息", "任职经历", "校外实习或工作经历", "校外实习", "校外工作经历", "work experience", "employment history", "experience"],
+    anchors: ["公司名称", "企业名称", "单位名称", "实习单位", "任职公司", "公司", "企业", "company", "employer", "organization"],
     fields: {
-      company: ["公司名称", "单位名称", "实习单位", "任职公司", "公司", "company", "employer", "organization"],
+      company: ["公司名称", "企业名称", "单位名称", "实习单位", "任职公司", "公司", "企业", "company", "employer", "organization"],
       department: ["所在部门", "部门名称", "任职部门", "实习部门", "部门", "department", "team"],
       position: ["职位名称", "岗位名称", "任职岗位", "担任岗位", "实习岗位", "担任职务", "职位", "岗位", "job title", "title", "position"],
       type: ["工作性质", "经历类型", "实习/全职", "employment type"],
       city: ["工作地点", "工作城市", "实习地点", "城市", "location", "city"],
       description: ["工作职责", "工作内容", "实习内容", "工作描述", "职责描述", "经历描述", "内容", "描述", "description", "responsibilities"],
+      hasExperience: ["是否有相关经历", "是否有校外实习或工作经历", "是否有实习经历", "是否有工作经历", "相关经历"]
     },
     label: record => `${record.company || "未填写公司"} / ${record.position || "未填写职位"}`
   },
@@ -1273,7 +1274,9 @@ function findSection(titles, definition) {
   const headings = queryAllDeep(document, "h1,h2,h3,h4,h5,h6,legend,div,span,p,li")
     .filter(element => {
       if (!isVisible(element) || element.children.length > 5) return false;
-      if (element.closest("nav,aside,[role=navigation]")) return false;
+      if (element.closest("nav,[role=navigation]")) return false;
+      const aside = element.closest("aside");
+      if (aside && aside.querySelectorAll("a,button,[role=button]").length > 1) return false;
       const text = normalizeText(directText(element) || shortText(element));
       return titleSet.some(title => text === title || text.startsWith(title));
     });
@@ -1449,6 +1452,19 @@ async function fillWorkByLayout(block, record, overwrite, used) {
   diagnostics.push(`日期控件${dateControls.length}`);
   diagnostics.push(`文本域${textareas.length}`);
   diagnostics.push(`内容${description.length}字`);
+
+  const presenceAliases = REPEAT_DEFS.find(item => item.type === "work").fields.hasExperience;
+  const presenceControl = findControlNearLabel(block, presenceAliases, "hasExperience", used);
+  if (presenceControl && (overwrite || isBlankControl(presenceControl))) {
+    used.add(presenceControl);
+    handledKeys.add("hasExperience");
+    const status = await fillControl(presenceControl, "是", true);
+    if (status === "filled") {
+      filled += 1;
+      notes.push("是否有相关经历");
+      await sleep(180);
+    }
+  }
 
   const partsResult = await fillYearMonthParts(block, record, overwrite, used);
   filled += partsResult.filled;
