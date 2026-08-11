@@ -1,6 +1,7 @@
 const defaultAiRules = [];
 const MAIL_NATIVE_HOST = "cn.local.jianfill.mail";
 const MAIL_ALARM = "jianfill-mail-sync";
+const NATIVE_MESSAGE_TIMEOUT_MS = 5 * 60 * 1000;
 
 chrome.runtime.onInstalled.addListener(async () => {
   const current = await chrome.storage.local.get(null);
@@ -221,18 +222,47 @@ ${JSON.stringify(candidates)}`;
 
 function sendNativeMessage(payload) {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendNativeMessage(MAIL_NATIVE_HOST, payload, response => {
-      const error = chrome.runtime.lastError;
-      if (error) {
-        reject(new Error(error.message || "本地桥接不可用"));
-        return;
+    let port;
+    let settled = false;
+    let timer;
+
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback(value);
+      try {
+        port?.disconnect();
+      } catch {
+        // The native host may already have closed the port.
       }
+    };
+
+    try {
+      // A persistent port keeps the MV3 service worker alive while a mail sync
+      // waits on IMAP, AI extraction, and Feishu requests.
+      port = chrome.runtime.connectNative(MAIL_NATIVE_HOST);
+    } catch (error) {
+      reject(new Error(error.message || "本地桥接不可用"));
+      return;
+    }
+
+    port.onMessage.addListener(response => {
       if (!response) {
-        reject(new Error("本地桥接没有返回结果"));
+        finish(reject, new Error("本地桥接没有返回结果"));
         return;
       }
-      resolve(response);
+      finish(resolve, response);
     });
+    port.onDisconnect.addListener(() => {
+      if (settled) return;
+      const error = chrome.runtime.lastError;
+      finish(reject, new Error(error?.message || "本地桥接连接已断开"));
+    });
+    timer = setTimeout(() => {
+      finish(reject, new Error("本地桥接响应超时，请检查网络后重试"));
+    }, NATIVE_MESSAGE_TIMEOUT_MS);
+    port.postMessage(payload);
   });
 }
 
