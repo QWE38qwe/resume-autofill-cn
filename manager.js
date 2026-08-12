@@ -1224,18 +1224,25 @@ function mailSettingsDefaults() {
     port: 993,
     folder: "INBOX",
     autoSync: true,
-    dryRun: true,
-    syncIntervalMinutes: 120,
+    syncIntervalMinutes: 720,
+    lookbackHours: 24,
     tableId: "tblhXjQP5FKvqWUm",
     companyField: "公司",
     noteField: "note",
     assessmentLinkField: "测评链接",
-    ddlField: "ddl"
+    ddlField: "ddl",
+    parentField: "父记录",
+    receivedAtField: "开始日期",
+    subjectField: "最新进展记录"
   };
 }
 
 function renderMailSettings() {
   const settings = { ...mailSettingsDefaults(), ...(db.mailSettings || {}) };
+  if (Number(settings.syncIntervalMinutes) === 120) {
+    settings.syncIntervalMinutes = 720;
+  }
+  delete settings.dryRun;
   $("#mailAddress").value = settings.address || "";
   $("#mailAuthCode").value = settings.authCode || "";
   $("#mailHost").value = settings.host;
@@ -1248,8 +1255,13 @@ function renderMailSettings() {
   $("#mailNoteField").value = settings.noteField;
   $("#mailLinkField").value = settings.assessmentLinkField;
   $("#mailDdlField").value = settings.ddlField;
+  $("#mailParentField").value = settings.parentField;
+  $("#mailReceivedAtField").value = settings.receivedAtField;
+  $("#mailSubjectField").value = settings.subjectField;
   $("#mailAutoSync").checked = Boolean(settings.autoSync);
-  $("#mailDryRun").checked = Boolean(settings.dryRun);
+  $("#mailSyncIntervalHours").value = Number(settings.syncIntervalMinutes) / 60;
+  $("#mailLookbackHours").value = settings.lookbackHours;
+  $("#mailLookbackLabel").textContent = `最近 ${settings.lookbackHours} 小时`;
 
   const providers = activeAiProviders();
   $("#mailAiSummary").textContent = providers.length
@@ -1265,6 +1277,14 @@ function renderMailSettings() {
 }
 
 function mailSettingsFromForm() {
+  const syncIntervalHours = Number($("#mailSyncIntervalHours").value);
+  const lookbackHours = Number($("#mailLookbackHours").value);
+  if (!Number.isFinite(syncIntervalHours) || syncIntervalHours < .5 || syncIntervalHours > 168) {
+    throw new Error("自动同步间隔需在 0.5 到 168 小时之间");
+  }
+  if (!Number.isInteger(lookbackHours) || lookbackHours < 1 || lookbackHours > 720) {
+    throw new Error("邮件捕捉周期需为 1 到 720 之间的整数小时");
+  }
   return {
     address: $("#mailAddress").value.trim(),
     authCode: $("#mailAuthCode").value.trim(),
@@ -1279,9 +1299,12 @@ function mailSettingsFromForm() {
     noteField: $("#mailNoteField").value.trim() || "note",
     assessmentLinkField: $("#mailLinkField").value.trim() || "测评链接",
     ddlField: $("#mailDdlField").value.trim() || "ddl",
+    parentField: $("#mailParentField").value.trim() || "父记录",
+    receivedAtField: $("#mailReceivedAtField").value.trim() || "开始日期",
+    subjectField: $("#mailSubjectField").value.trim() || "最新进展记录",
     autoSync: $("#mailAutoSync").checked,
-    dryRun: $("#mailDryRun").checked,
-    syncIntervalMinutes: 120
+    syncIntervalMinutes: Math.round(syncIntervalHours * 60),
+    lookbackHours
   };
 }
 
@@ -1327,7 +1350,7 @@ function filteredMailHistory() {
   const status = $("#mailStatusFilter").value;
   const category = $("#mailCategoryFilter").value;
   return (db.mailHistory || []).filter(item =>
-    (!status || item.status === status) &&
+    (status === "__default__" ? item.status !== "已忽略" : (!status || item.status === status)) &&
     (!category || item.category === category)
   );
 }
@@ -1338,6 +1361,7 @@ function renderMailDashboard() {
   $("#mailFetchedMetric").textContent = summary.fetched || 0;
   $("#mailUpdatedMetric").textContent = summary.updated || 0;
   $("#mailIgnoredMetric").textContent = summary.irrelevant || 0;
+  $("#mailSkippedMetric").textContent = summary.alreadyProcessed || 0;
   $("#mailReviewMetric").textContent = summary.needsReview || 0;
   if (status.state === "syncing") {
     $("#mailLastSync").textContent = "正在读取邮箱并核对飞书…";
@@ -1412,8 +1436,7 @@ $("#syncMailNow").addEventListener("click", async () => {
     const mailSettings = await persistMailSettings(false);
     if (!activeAiProviders().length) throw new Error("请先在设置中启用至少一个 AI 模型版本");
     const result = await chrome.runtime.sendMessage({
-      type: "MAIL_SYNC",
-      dryRun: Boolean(mailSettings.dryRun)
+      type: "MAIL_SYNC"
     });
     if (!result?.ok) throw new Error(result?.error || "同步失败");
     await refreshMailState();

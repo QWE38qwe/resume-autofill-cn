@@ -22,10 +22,13 @@ class StateStore:
         self.connection.commit()
 
     def is_processed(self, message_id: str) -> bool:
+        return self.processed_outcome(message_id) is not None
+
+    def processed_outcome(self, message_id: str) -> str | None:
         row = self.connection.execute(
-            "SELECT 1 FROM processed_messages WHERE message_id = ?", (message_id,)
+            "SELECT outcome FROM processed_messages WHERE message_id = ?", (message_id,)
         ).fetchone()
-        return row is not None
+        return str(row[0]) if row else None
 
     def mark_processed(self, message_id: str, uid: str, outcome: str) -> None:
         self.connection.execute(

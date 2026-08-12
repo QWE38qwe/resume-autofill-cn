@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -8,7 +9,7 @@ from job_email_assistant.extractors import (
     _parse_deadline,
     extract_with_rules,
 )
-from job_email_assistant.mailbox import parse_message
+from job_email_assistant.mailbox import parse_message, recent_messages
 from job_email_assistant.models import ParsedEmail
 
 
@@ -118,4 +119,18 @@ def test_llm_json_code_fence_is_supported() -> None:
 def test_llm_company_value_is_cleaned() -> None:
     assert _clean_company("51job") is None
     assert _clean_company("iTalent") is None
+    assert _clean_company("careers") is None
     assert _clean_company("网易游戏雷火｜27届秋招") == "网易雷火"
+
+
+def test_recent_messages_filters_exact_hours_and_sorts_descending() -> None:
+    now = datetime(2026, 8, 12, 12, 0, tzinfo=timezone.utc)
+    recent = replace(message("最近"), received_at=now - timedelta(hours=1))
+    boundary = replace(message("边界"), received_at=now - timedelta(hours=24))
+    expired = replace(
+        message("过期"), received_at=now - timedelta(hours=24, seconds=1)
+    )
+
+    result = recent_messages([boundary, expired, recent], 24, now)
+
+    assert [item.subject for item in result] == ["最近", "边界"]

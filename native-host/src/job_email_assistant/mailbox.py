@@ -18,6 +18,23 @@ from .models import ParsedEmail
 logger = logging.getLogger(__name__)
 
 
+def recent_messages(
+    messages: list[ParsedEmail],
+    lookback_hours: int,
+    now: datetime | None = None,
+) -> list[ParsedEmail]:
+    cutoff = (now or datetime.now(timezone.utc)) - timedelta(hours=lookback_hours)
+    return sorted(
+        (
+            message
+            for message in messages
+            if message.received_at.astimezone(timezone.utc) >= cutoff
+        ),
+        key=lambda item: item.received_at,
+        reverse=True,
+    )
+
+
 def _decode_header(value: str | None) -> str:
     if not value:
         return ""
@@ -89,7 +106,8 @@ class ImapMailbox:
         raise RuntimeError("Unreachable retry state")
 
     def _fetch_recent_once(self) -> list[ParsedEmail]:
-        since = (datetime.now() - timedelta(days=self.settings.mail_lookback_days)).strftime(
+        now = datetime.now(timezone.utc)
+        since = (now - timedelta(hours=self.settings.mail_lookback_hours)).strftime(
             "%d-%b-%Y"
         )
         logger.info("Connecting to IMAP host %s", self.settings.mail_host)
@@ -119,4 +137,4 @@ class ImapMailbox:
                     logger.warning("Skipping unreadable IMAP UID %s", uid)
                     continue
                 messages.append(parse_message(payload[0][1], uid))
-            return messages
+            return recent_messages(messages, self.settings.mail_lookback_hours, now)

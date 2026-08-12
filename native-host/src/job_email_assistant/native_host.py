@@ -64,6 +64,9 @@ def parse_env_file(path: Path) -> dict[str, str]:
 def local_config() -> dict[str, Any]:
     values = parse_env_file(ENV_FILE)
     provider_name = values.get("LLM_PROVIDER_NAME") or values.get("LLM_MODEL") or "本地模型"
+    sync_interval = int(values.get("POLL_INTERVAL_MINUTES") or 720)
+    if sync_interval == 120:
+        sync_interval = 720
     return {
         "ok": True,
         "mailSettings": {
@@ -73,8 +76,8 @@ def local_config() -> dict[str, Any]:
             "port": int(values.get("MAIL_PORT") or 993),
             "folder": values.get("MAIL_FOLDER") or "INBOX",
             "autoSync": True,
-            "dryRun": str(values.get("DRY_RUN") or "").lower() in {"1", "true", "yes", "on"},
-            "syncIntervalMinutes": int(values.get("POLL_INTERVAL_MINUTES") or 120),
+            "syncIntervalMinutes": sync_interval,
+            "lookbackHours": int(values.get("MAIL_LOOKBACK_HOURS") or 24),
             "appId": values.get("FEISHU_APP_ID") or "",
             "appSecret": values.get("FEISHU_APP_SECRET") or "",
             "baseToken": values.get("FEISHU_BASE_TOKEN") or "",
@@ -83,6 +86,9 @@ def local_config() -> dict[str, Any]:
             "noteField": values.get("FEISHU_NOTE_FIELD") or "note",
             "assessmentLinkField": values.get("FEISHU_ASSESSMENT_LINK_FIELD") or "测评链接",
             "ddlField": values.get("FEISHU_DDL_FIELD") or "ddl",
+            "parentField": values.get("FEISHU_PARENT_FIELD") or "父记录",
+            "receivedAtField": values.get("FEISHU_RECEIVED_AT_FIELD") or "开始日期",
+            "subjectField": values.get("FEISHU_SUBJECT_FIELD") or "最新进展记录",
         },
         "aiProvider": {
             "id": "local-env-default",

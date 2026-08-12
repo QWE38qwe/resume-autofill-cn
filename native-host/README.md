@@ -26,8 +26,8 @@ Native Messaging manifest。脚本还会从 `.env` 生成权限为 `600` 的
 ./native-host/uninstall.sh
 ```
 
-去重数据库保存在 `native-host/data/state.db`。删除该文件会使最近 7 天邮件
-重新参与识别；执行前应先在插件中启用预演模式。
+去重数据库保存在安装目录的 `data/state.db`。删除该文件会使捕捉周期内邮件
+重新参与识别；已成功写入和已忽略邮件会继续保持去重。
 
 ## 开发检查
 

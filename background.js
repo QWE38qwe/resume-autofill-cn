@@ -5,7 +5,7 @@ const NATIVE_MESSAGE_TIMEOUT_MS = 5 * 60 * 1000;
 
 chrome.runtime.onInstalled.addListener(async () => {
   const current = await chrome.storage.local.get(null);
-  const payload = { seedVersion: 5 };
+  const payload = { seedVersion: 6 };
   const arrayKeys = [
     "education", "profiles", "projects", "awards", "languages", "skills",
     "certificates", "family", "papers", "portfolio", "customFields", "fillHistory",
@@ -29,20 +29,31 @@ chrome.runtime.onInstalled.addListener(async () => {
   settings.aiProviders = normalizeAiProviders(settings);
   settings.apiConfigured = activeAiProviders(settings).length > 0;
   payload.settings = settings;
+  const currentMailSettings = current.mailSettings || {};
   payload.mailSettings = {
     host: "imap.126.com",
     port: 993,
     folder: "INBOX",
     autoSync: true,
-    dryRun: true,
-    syncIntervalMinutes: 120,
+    syncIntervalMinutes:
+      Number(currentMailSettings.syncIntervalMinutes) === 120
+        ? 720
+        : Number(currentMailSettings.syncIntervalMinutes) || 720,
+    lookbackHours: Number(currentMailSettings.lookbackHours) || 24,
     tableId: "tblhXjQP5FKvqWUm",
     companyField: "公司",
     noteField: "note",
     assessmentLinkField: "测评链接",
     ddlField: "ddl",
-    ...(current.mailSettings || {})
+    parentField: "父记录",
+    receivedAtField: "开始日期",
+    subjectField: "最新进展记录",
+    ...currentMailSettings
   };
+  delete payload.mailSettings.dryRun;
+  if (Number(currentMailSettings.syncIntervalMinutes) === 120) {
+    payload.mailSettings.syncIntervalMinutes = 720;
+  }
   await chrome.storage.local.set(payload);
   await scheduleMailSync(payload.mailSettings);
 });
@@ -269,23 +280,23 @@ function sendNativeMessage(payload) {
 async function scheduleMailSync(mailSettings = {}) {
   await chrome.alarms.clear(MAIL_ALARM);
   if (!mailSettings.autoSync) return;
-  const periodInMinutes = Math.max(30, Number(mailSettings.syncIntervalMinutes) || 120);
+  const periodInMinutes = Math.max(30, Number(mailSettings.syncIntervalMinutes) || 720);
   await chrome.alarms.create(MAIL_ALARM, { periodInMinutes });
 }
 
-function mailPayload(mailSettings, settings, dryRun) {
+function mailPayload(mailSettings, settings) {
   const providers = activeAiProviders(settings);
   const primary = providers[0] || {};
   return {
     action: "sync",
-    dryRun: Boolean(dryRun),
-    pollIntervalMinutes: Number(mailSettings.syncIntervalMinutes) || 120,
+    pollIntervalMinutes: Number(mailSettings.syncIntervalMinutes) || 720,
     mail: {
       address: mailSettings.address,
       authCode: mailSettings.authCode,
       host: mailSettings.host || "imap.126.com",
       port: Number(mailSettings.port) || 993,
-      folder: mailSettings.folder || "INBOX"
+      folder: mailSettings.folder || "INBOX",
+      lookbackHours: Number(mailSettings.lookbackHours) || 24
     },
     ai: {
       apiBase: primary.apiBase,
@@ -307,7 +318,10 @@ function mailPayload(mailSettings, settings, dryRun) {
       companyField: mailSettings.companyField || "公司",
       noteField: mailSettings.noteField || "note",
       assessmentLinkField: mailSettings.assessmentLinkField || "测评链接",
-      ddlField: mailSettings.ddlField || "ddl"
+      ddlField: mailSettings.ddlField || "ddl",
+      parentField: mailSettings.parentField || "父记录",
+      receivedAtField: mailSettings.receivedAtField || "开始日期",
+      subjectField: mailSettings.subjectField || "最新进展记录"
     }
   };
 }
@@ -315,15 +329,23 @@ function mailPayload(mailSettings, settings, dryRun) {
 function mergeMailHistory(existing, incoming) {
   const merged = new Map((existing || []).map(item => [item.messageId, item]));
   (incoming || []).forEach(item => {
-    if (item.status === "已处理" && merged.has(item.messageId)) return;
-    merged.set(item.messageId, item);
+    const previous = merged.get(item.messageId);
+    if (!previous) {
+      merged.set(item.messageId, item);
+      return;
+    }
+    const next = { ...previous, ...item };
+    ["company", "category", "deadline", "assessmentUrl"].forEach(key => {
+      if (item[key] == null && previous[key] != null) next[key] = previous[key];
+    });
+    merged.set(item.messageId, next);
   });
   return [...merged.values()]
     .sort((left, right) => Date.parse(right.receivedAt || 0) - Date.parse(left.receivedAt || 0))
     .slice(0, 300);
 }
 
-async function syncMail({ dryRun, source = "manual" } = {}) {
+async function syncMail({ source = "manual" } = {}) {
   const { mailSettings = {}, settings = {}, mailHistory = [] } =
     await chrome.storage.local.get(["mailSettings", "settings", "mailHistory"]);
   const startedAt = new Date().toISOString();
@@ -331,10 +353,7 @@ async function syncMail({ dryRun, source = "manual" } = {}) {
     mailSyncStatus: { state: "syncing", source, startedAt }
   });
   try {
-    const effectiveDryRun = dryRun ?? Boolean(mailSettings.dryRun);
-    const response = await sendNativeMessage(
-      mailPayload(mailSettings, settings, effectiveDryRun)
-    );
+    const response = await sendNativeMessage(mailPayload(mailSettings, settings));
     if (!response.ok) throw new Error(response.error || "邮件同步失败");
     const summary = response.summary || {};
     const nextHistory = mergeMailHistory(mailHistory, summary.details);
@@ -347,6 +366,7 @@ async function syncMail({ dryRun, source = "manual" } = {}) {
         fetched: summary.fetched || 0,
         updated: summary.updated || 0,
         irrelevant: summary.irrelevant || 0,
+        alreadyProcessed: summary.already_processed || 0,
         needsReview: summary.needs_review || 0,
         failed: summary.failed || 0
       }
@@ -392,7 +412,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message.type === "MAIL_SYNC") {
-    syncMail({ dryRun: Boolean(message.dryRun), source: "manual" })
+    syncMail({ source: "manual" })
       .then(sendResponse)
       .catch(error => sendResponse({ ok: false, error: error.message }));
     return true;

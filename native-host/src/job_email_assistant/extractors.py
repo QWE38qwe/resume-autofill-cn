@@ -46,6 +46,10 @@ DEADLINE_CONTEXT_RE = re.compile(
 )
 GENERIC_COMPANY_LABELS = {
     "51job",
+    "careers",
+    "career",
+    "jobs",
+    "campus",
     "italent",
     "mail",
     "service",

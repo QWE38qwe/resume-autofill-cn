@@ -15,13 +15,6 @@ def _required(name: str) -> str:
     return value
 
 
-def _bool(name: str, default: bool = False) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
 @dataclass(frozen=True)
 class LlmProvider:
     name: str
@@ -37,7 +30,7 @@ class Settings:
     mail_host: str
     mail_port: int
     mail_folder: str
-    mail_lookback_days: int
+    mail_lookback_hours: int
     llm_base_url: str
     llm_api_key: str
     llm_model: str
@@ -51,10 +44,12 @@ class Settings:
     feishu_note_field: str
     feishu_assessment_link_field: str
     feishu_ddl_field: str
+    feishu_parent_field: str
+    feishu_received_at_field: str
+    feishu_subject_field: str
     poll_interval_minutes: int
     state_db_path: Path
     log_level: str
-    dry_run: bool
 
     @classmethod
     def from_env(
@@ -78,7 +73,7 @@ class Settings:
             mail_host=os.getenv("MAIL_HOST", "imap.126.com"),
             mail_port=int(os.getenv("MAIL_PORT", "993")),
             mail_folder=os.getenv("MAIL_FOLDER", "INBOX"),
-            mail_lookback_days=int(os.getenv("MAIL_LOOKBACK_DAYS", "7")),
+            mail_lookback_hours=int(os.getenv("MAIL_LOOKBACK_HOURS", "24")),
             llm_base_url=primary_provider.base_url,
             llm_api_key=primary_provider.api_key,
             llm_model=primary_provider.model,
@@ -94,10 +89,16 @@ class Settings:
                 "FEISHU_ASSESSMENT_LINK_FIELD", "测评链接"
             ),
             feishu_ddl_field=os.getenv("FEISHU_DDL_FIELD", "ddl"),
-            poll_interval_minutes=int(os.getenv("POLL_INTERVAL_MINUTES", "120")),
+            feishu_parent_field=os.getenv("FEISHU_PARENT_FIELD", "父记录"),
+            feishu_received_at_field=os.getenv(
+                "FEISHU_RECEIVED_AT_FIELD", "开始日期"
+            ),
+            feishu_subject_field=os.getenv(
+                "FEISHU_SUBJECT_FIELD", "最新进展记录"
+            ),
+            poll_interval_minutes=int(os.getenv("POLL_INTERVAL_MINUTES", "720")),
             state_db_path=Path(os.getenv("STATE_DB_PATH", "./data/state.db")).expanduser(),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
-            dry_run=_bool("DRY_RUN"),
         )
 
     @classmethod
@@ -139,7 +140,7 @@ class Settings:
             mail_host=str(mail.get("host") or "imap.126.com").strip(),
             mail_port=int(mail.get("port") or 993),
             mail_folder=str(mail.get("folder") or "INBOX").strip(),
-            mail_lookback_days=7,
+            mail_lookback_hours=max(1, int(mail.get("lookbackHours") or 24)),
             llm_base_url=primary_provider.base_url,
             llm_api_key=primary_provider.api_key,
             llm_model=primary_provider.model,
@@ -155,8 +156,14 @@ class Settings:
                 feishu.get("assessmentLinkField") or "测评链接"
             ),
             feishu_ddl_field=str(feishu.get("ddlField") or "ddl"),
-            poll_interval_minutes=max(30, int(payload.get("pollIntervalMinutes") or 120)),
+            feishu_parent_field=str(feishu.get("parentField") or "父记录"),
+            feishu_received_at_field=str(
+                feishu.get("receivedAtField") or "开始日期"
+            ),
+            feishu_subject_field=str(
+                feishu.get("subjectField") or "最新进展记录"
+            ),
+            poll_interval_minutes=max(30, int(payload.get("pollIntervalMinutes") or 720)),
             state_db_path=state_db_path,
             log_level="WARNING",
-            dry_run=bool(payload.get("dryRun", False)),
         )

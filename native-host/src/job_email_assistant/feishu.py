@@ -32,6 +32,23 @@ def normalize_company(value: str) -> str:
     return aliases.get(value, value)
 
 
+def has_link_value(value: Any) -> bool:
+    if not value:
+        return False
+    if not isinstance(value, list):
+        return True
+    for item in value:
+        if isinstance(item, str) and item:
+            return True
+        if not isinstance(item, dict):
+            continue
+        if item.get("id") or item.get("record_id") or item.get("record_ids"):
+            return True
+        if item.get("text_arr"):
+            return True
+    return False
+
+
 class FeishuBaseClient:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -111,6 +128,9 @@ class FeishuBaseClient:
             self.settings.feishu_note_field,
             self.settings.feishu_assessment_link_field,
             self.settings.feishu_ddl_field,
+            self.settings.feishu_parent_field,
+            self.settings.feishu_received_at_field,
+            self.settings.feishu_subject_field,
         }
         missing = required - actual
         if missing:
@@ -132,31 +152,46 @@ class FeishuBaseClient:
                 return records
             page_token = data.get("page_token")
 
-    def find_company(
+    def find_company_parents(
         self, company: str, records: list[BaseRecord] | None = None
     ) -> list[BaseRecord]:
         target = normalize_company(company)
         matches: list[BaseRecord] = []
         for record in records if records is not None else self.list_records():
             value = record.fields.get(self.settings.feishu_company_field)
-            if value is not None and normalize_company(str(value)) == target:
+            parent = record.fields.get(self.settings.feishu_parent_field)
+            if (
+                value is not None
+                and not has_link_value(parent)
+                and normalize_company(str(value)) == target
+            ):
                 matches.append(record)
         return matches
 
-    def update_record(
+    def create_child_record(
         self,
-        record: BaseRecord,
+        parent: BaseRecord,
+        company: str,
+        subject: str,
+        received_at: int,
         note: str,
         assessment_url: str | None,
         deadline: str | None,
-    ) -> None:
-        fields: dict[str, Any] = {self.settings.feishu_note_field: note}
+    ) -> str:
+        fields: dict[str, Any] = {
+            self.settings.feishu_company_field: company,
+            self.settings.feishu_note_field: note,
+            self.settings.feishu_parent_field: [parent.record_id],
+            self.settings.feishu_received_at_field: received_at,
+            self.settings.feishu_subject_field: subject,
+        }
         if assessment_url:
             fields[self.settings.feishu_assessment_link_field] = assessment_url
         if deadline:
             fields[self.settings.feishu_ddl_field] = deadline
-        self._request(
-            "PUT",
-            f"{self._table_path}/records/{record.record_id}",
+        data = self._request(
+            "POST",
+            f"{self._table_path}/records",
             json={"fields": fields},
         )
+        return str(data.get("record", {}).get("record_id") or "")

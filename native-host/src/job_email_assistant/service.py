@@ -83,14 +83,14 @@ class SyncService:
         result.needs_review = not result.company
         return result
 
-    def _update_match(
-        self, result: Extraction, record: BaseRecord
+    def _create_child(
+        self, message: ParsedEmail, result: Extraction, parent: BaseRecord
     ) -> None:
-        if self.settings.dry_run:
-            logger.info("Dry run: would update %s for %s", record.record_id, result.company)
-            return
-        self.feishu.update_record(
-            record,
+        self.feishu.create_child_record(
+            parent,
+            result.company or "",
+            message.subject,
+            int(message.received_at.timestamp() * 1000),
             render_note(result),
             result.assessment_url,
             render_deadline(result),
@@ -99,58 +99,66 @@ class SyncService:
     def run_once(self) -> SyncSummary:
         self.feishu.validate_fields()
         records = self.feishu.list_records()
-        messages = self.mailbox.fetch_recent()
+        messages = sorted(
+            self.mailbox.fetch_recent(),
+            key=lambda item: item.received_at,
+            reverse=True,
+        )
         summary = SyncSummary(fetched=len(messages))
         for message in messages:
-            if self.state.is_processed(message.message_id):
+            processed_outcome = self.state.processed_outcome(message.message_id)
+            if processed_outcome:
                 summary.already_processed += 1
+                previous_status = {
+                    "updated": "已写入",
+                    "irrelevant": "已忽略",
+                    "needs_review": "待确认",
+                }.get(processed_outcome, "已跳过")
                 summary.details.append(
-                    detail_for(message, "已处理", reason="本地去重记录已存在")
+                    detail_for(
+                        message,
+                        previous_status,
+                        reason="本地去重记录已存在，本次同步已跳过",
+                    )
                 )
                 continue
             try:
                 result = self._extract(message)
                 if not result.is_recruitment:
-                    if not self.settings.dry_run:
-                        self.state.mark_processed(
-                            message.message_id, message.uid, "irrelevant"
-                        )
+                    self.state.mark_processed(
+                        message.message_id, message.uid, "irrelevant"
+                    )
                     summary.irrelevant += 1
                     summary.details.append(
                         detail_for(message, "已忽略", result, result.evidence[0])
                     )
                     continue
                 if not result.company:
-                    if not self.settings.dry_run:
-                        self.state.mark_processed(
-                            message.message_id, message.uid, "needs_review"
-                        )
+                    self.state.mark_processed(
+                        message.message_id, message.uid, "needs_review"
+                    )
                     summary.needs_review += 1
                     summary.details.append(
                         detail_for(message, "待确认", result, "无法确定公司")
                     )
                     continue
-                matches = self.feishu.find_company(result.company, records)
+                matches = self.feishu.find_company_parents(result.company, records)
                 if len(matches) != 1:
-                    if not self.settings.dry_run:
-                        self.state.mark_processed(
-                            message.message_id, message.uid, "needs_review"
-                        )
+                    self.state.mark_processed(
+                        message.message_id, message.uid, "needs_review"
+                    )
                     summary.needs_review += 1
-                    reason = "目标表无该公司" if not matches else "目标表存在同名公司"
+                    reason = (
+                        "目标表无该公司主记录"
+                        if not matches
+                        else "目标表存在多个同名公司主记录"
+                    )
                     summary.details.append(detail_for(message, "待确认", result, reason))
                     continue
-                self._update_match(result, matches[0])
-                if not self.settings.dry_run:
-                    self.state.mark_processed(message.message_id, message.uid, "updated")
+                self._create_child(message, result, matches[0])
+                self.state.mark_processed(message.message_id, message.uid, "updated")
                 summary.updated += 1
-                summary.details.append(
-                    detail_for(
-                        message,
-                        "将写入" if self.settings.dry_run else "已写入",
-                        result,
-                    )
-                )
+                summary.details.append(detail_for(message, "已写入", result))
             except Exception as error:
                 logger.exception("Failed to process %s", message.message_id)
                 summary.failed += 1
