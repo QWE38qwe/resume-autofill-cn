@@ -3,6 +3,7 @@ set -euo pipefail
 
 HOST_NAME="cn.local.jianfill.mail"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+INSTALL_ROOT="$HOME/Library/Application Support/Jianfill Mail Host"
 EXTENSION_ID="${1:-}"
 
 if [[ ! "$EXTENSION_ID" =~ ^[a-p]{32}$ ]]; then
@@ -16,10 +17,18 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 3
 fi
 
-cd "$ROOT"
+mkdir -p "$INSTALL_ROOT"
+/usr/bin/ditto "$ROOT/src" "$INSTALL_ROOT/src"
+cp "$ROOT/pyproject.toml" "$ROOT/uv.lock" "$ROOT/run-host.sh" "$INSTALL_ROOT/"
+if [[ -f "$ROOT/.env" ]]; then
+  cp "$ROOT/.env" "$INSTALL_ROOT/.env"
+  chmod 600 "$INSTALL_ROOT/.env"
+fi
+
+cd "$INSTALL_ROOT"
 uv sync
-chmod 700 "$ROOT/run-host.sh"
-"$ROOT/.venv/bin/python" \
+chmod 700 "$INSTALL_ROOT/run-host.sh"
+"$INSTALL_ROOT/.venv/bin/python" \
   -m job_email_assistant.export_local_config \
   "$ROOT/local-config.json"
 
@@ -27,7 +36,7 @@ MANIFEST=$(cat <<EOF
 {
   "name": "$HOST_NAME",
   "description": "简填邮件待办本地桥接",
-  "path": "$ROOT/run-host.sh",
+  "path": "$INSTALL_ROOT/run-host.sh",
   "type": "stdio",
   "allowed_origins": ["chrome-extension://$EXTENSION_ID/"]
 }
