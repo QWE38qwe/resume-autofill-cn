@@ -16,6 +16,8 @@ def test_company_normalization() -> None:
     assert normalize_company("腾讯招聘") == "腾讯"
     assert normalize_company("DJI 大疆") == "大疆"
     assert normalize_company("讯飞") == "科大讯飞"
+    assert normalize_company("拼多多集团PDD") == "拼多多"
+    assert normalize_company("PDD拼多多") == "拼多多"
 
 
 def test_note_is_exact_category_only() -> None:

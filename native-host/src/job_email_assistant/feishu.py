@@ -28,6 +28,9 @@ def normalize_company(value: str) -> str:
         "iflytek": "科大讯飞",
         "讯飞": "科大讯飞",
         "antgroup": "蚂蚁",
+        "pdd": "拼多多",
+        "pdd拼多多": "拼多多",
+        "拼多多集团pdd": "拼多多",
     }
     return aliases.get(value, value)
 

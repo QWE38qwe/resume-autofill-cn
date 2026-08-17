@@ -120,6 +120,7 @@ def test_llm_company_value_is_cleaned() -> None:
     assert _clean_company("51job") is None
     assert _clean_company("iTalent") is None
     assert _clean_company("careers") is None
+    assert _clean_company("拼多多集团PDD校招") == "拼多多"
     assert _clean_company("网易游戏雷火｜27届秋招") == "网易雷火"
 
 
