@@ -6,6 +6,8 @@ import os
 import platform
 import re
 import subprocess
+import sys
+import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
@@ -115,6 +117,42 @@ CHANNELS = (
         ),
         ("text=暂无应聘记录", "text=暂无投递记录", '[class*="empty"]'),
     ),
+    Channel(
+        "jd",
+        "京东",
+        "京东",
+        "https://campus.jd.com/#/personalCenter/deliveryRecord",
+        ("/login", "passport.jd.com", "plogin"),
+        ('[class*="delivery"] [class*="item"]', '[class*="application"] [class*="item"]'),
+        ("text=暂无投递记录", "text=暂无应聘记录", '[class*="empty"]'),
+    ),
+    Channel(
+        "pdd",
+        "拼多多",
+        "拼多多",
+        "https://careers.pddglobalhr.com/campus/positions",
+        ("/login", "passport", "auth"),
+        ('[class*="application"] [class*="item"]', '[class*="delivery"] [class*="card"]'),
+        ("text=暂无投递记录", "text=暂无应聘记录", '[class*="empty"]'),
+    ),
+    Channel(
+        "oppo",
+        "OPPO",
+        "OPPO",
+        "https://careers.oppo.com/university/position",
+        ("/login", "passport", "auth"),
+        ('[class*="application"] [class*="item"]', '[class*="delivery"] [class*="card"]'),
+        ("text=暂无投递记录", "text=暂无应聘记录", '[class*="empty"]'),
+    ),
+    Channel(
+        "iflytek",
+        "科大讯飞",
+        "科大讯飞",
+        "https://campus.iflytek.com/#/candidateHome/application",
+        ("/login", "passport", "auth"),
+        ('[class*="application"] [class*="item"]', '[class*="delivery"] [class*="card"]'),
+        ("text=暂无投递记录", "text=暂无应聘记录", '[class*="empty"]'),
+    ),
 )
 
 
@@ -157,6 +195,11 @@ class AuthStore:
             return json.loads(Fernet(self._key()).decrypt(encrypted).decode("utf-8"))
         except (InvalidToken, ValueError, json.JSONDecodeError) as error:
             raise RuntimeError("登录态无法解密，请重新登录招聘网站") from error
+
+    def save(self, channel_id: str, state: dict[str, Any]) -> None:
+        self._path(channel_id).write_bytes(
+            Fernet(self._key()).encrypt(json.dumps(state).encode("utf-8"))
+        )
 
 
 def _matches_any(page: Any, selectors: tuple[str, ...]) -> bool:
@@ -216,18 +259,58 @@ def check_channel(channel: Channel, auth_store: AuthStore) -> ChannelStatus:
             channel.channel_id, channel.name, channel.company, "读取失败", detail or "巡检异常"
         )
 
+def get_channel(channel_id: str) -> Channel:
+    for channel in CHANNELS:
+        if channel.channel_id == channel_id:
+            return channel
+    raise ValueError("不支持的招聘渠道")
+
+
+def login_and_save(channel_id: str) -> None:
+    """Open a dedicated headed browser. Saving occurs only after the user closes it."""
+    channel = get_channel(channel_id)
+    auth_store = AuthStore(TRACKER_ROOT / "state" / "auth")
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=False)
+        context = browser.new_context(locale="zh-CN", timezone_id="Asia/Shanghai")
+        page = context.new_page()
+        page.goto(channel.applications_url, wait_until="domcontentloaded", timeout=60000)
+        try:
+            # Keep a dedicated login window open long enough for an interactive
+            # QR code, password, or captcha flow, then persist its storage state.
+            page.wait_for_timeout(5 * 60 * 1000)
+            auth_store.save(channel.channel_id, context.storage_state())
+        finally:
+            context.close()
+            browser.close()
+
+
+def start_login(channel_id: str) -> dict[str, str]:
+    channel = get_channel(channel_id)
+    subprocess.Popen(
+        [sys.executable, "-m", "job_email_assistant.progress_login", channel.channel_id],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return {"ok": True, "channelId": channel.channel_id, "name": channel.name}
+
 
 def run_monitor(feishu: FeishuBaseClient) -> dict[str, Any]:
     auth_store = AuthStore(TRACKER_ROOT / "state" / "auth")
     records = feishu.list_records()
     statuses = [check_channel(channel, auth_store) for channel in CHANNELS]
+    checked_at = int(time.time() * 1000)
     updated = 0
     for channel_status in statuses:
         parents = feishu.find_company_parents(channel_status.company, records)
         for parent in parents:
             feishu.update_record_fields(
                 parent,
-                {feishu.settings.feishu_cookie_status_field: channel_status.status},
+                {
+                    feishu.settings.feishu_cookie_status_field: channel_status.status,
+                    feishu.settings.feishu_cookie_checked_at_field: checked_at,
+                },
             )
             updated += 1
     return {

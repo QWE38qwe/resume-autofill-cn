@@ -11,7 +11,7 @@ from typing import Any, BinaryIO
 from . import __version__
 from .config import Settings
 from .feishu import FeishuBaseClient
-from .progress_monitor import run_monitor
+from .progress_monitor import run_monitor, start_login
 from .service import SyncService
 from .state import StateStore
 
@@ -125,6 +125,8 @@ def handle(message: dict[str, Any]) -> dict[str, Any]:
             return run_monitor(feishu)
         finally:
             feishu.close()
+    if action == "startProgressLogin":
+        return start_login(str(message.get("channelId") or ""))
     if action != "sync":
         raise ValueError(f"Unsupported action: {action}")
 

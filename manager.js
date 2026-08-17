@@ -1235,7 +1235,10 @@ function mailSettingsDefaults() {
     parentField: "父记录",
     receivedAtField: "开始日期",
     subjectField: "最新进展记录",
-    cookieStatusField: "Cookie状态"
+    cookieStatusField: "Cookie状态",
+    cookieCheckedAtField: "Cookie最近检测",
+    progressAutoSync: true,
+    progressIntervalMinutes: 720
   };
 }
 
@@ -1261,6 +1264,8 @@ function renderMailSettings() {
   $("#mailReceivedAtField").value = settings.receivedAtField;
   $("#mailSubjectField").value = settings.subjectField;
   $("#mailCookieStatusField").value = settings.cookieStatusField;
+  $("#progressAutoSync").checked = settings.progressAutoSync !== false;
+  $("#progressIntervalHours").value = String(Number(settings.progressIntervalMinutes) / 60 || 12);
   $("#mailAutoSync").checked = Boolean(settings.autoSync);
   $("#mailSyncIntervalHours").value = Number(settings.syncIntervalMinutes) / 60;
   $("#mailLookbackHours").value = settings.lookbackHours;
@@ -1306,6 +1311,9 @@ function mailSettingsFromForm() {
     receivedAtField: $("#mailReceivedAtField").value.trim() || "开始日期",
     subjectField: $("#mailSubjectField").value.trim() || "最新进展记录",
     cookieStatusField: $("#mailCookieStatusField").value.trim() || "Cookie状态",
+    cookieCheckedAtField: "Cookie最近检测",
+    progressAutoSync: $("#progressAutoSync").checked,
+    progressIntervalMinutes: Math.max(30, Math.round(Number($("#progressIntervalHours").value || 12) * 60)),
     autoSync: $("#mailAutoSync").checked,
     syncIntervalMinutes: Math.round(syncIntervalHours * 60),
     lookbackHours
@@ -1367,6 +1375,7 @@ function renderProgressMonitor() {
         <span class="progress-state ${progressStatusClass(channel.status)}">${safe(channel.status)}</span>
       </div>
       <p>${safe(channel.detail || "暂无详情")}</p>
+      <button class="btn ghost progress-login" data-channel-id="${safeAttr(channel.channel_id)}">重新登录</button>
     </div>
   `).join("") : '<div class="empty">点击“立即巡检”后显示招聘网站登录态状态。</div>';
   updateProgressBridge(
@@ -1523,6 +1532,26 @@ $("#runProgressMonitor").addEventListener("click", async () => {
   } finally {
     button.disabled = false;
     button.textContent = "立即巡检";
+  }
+});
+
+$("#progressAutoSync").addEventListener("change", () => persistMailSettings(false).catch(error => alert(error.message)));
+$("#progressIntervalHours").addEventListener("change", () => persistMailSettings(false).catch(error => alert(error.message)));
+$("#progressChannelList").addEventListener("click", async event => {
+  const button = event.target.closest(".progress-login");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const result = await chrome.runtime.sendMessage({
+      type: "PROGRESS_LOGIN",
+      channelId: button.dataset.channelId
+    });
+    if (!result?.ok) throw new Error(result?.error || "无法启动登录窗口");
+    alert(`已打开${result.name}登录窗口。请在 5 分钟内完成登录，窗口会自动保存登录态并关闭；随后点击“立即巡检”。`);
+  } catch (error) {
+    alert(error.message || "无法启动登录窗口");
+  } finally {
+    button.disabled = false;
   }
 });
 

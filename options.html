@@ -90,6 +90,8 @@
     </div>
     <div class="mail-hero-actions">
       <span class="bridge-state" id="progressBridgeStatus"><i></i>等待巡检</span>
+      <label class="compact-toggle"><input type="checkbox" id="progressAutoSync" checked> 自动巡检</label>
+      <select id="progressIntervalHours" aria-label="投递进展巡检间隔"><option value="12">12 小时</option><option value="6">6 小时</option><option value="24">24 小时</option></select>
       <button class="btn primary" id="runProgressMonitor">立即巡检</button>
     </div>
   </div>
@@ -107,6 +109,7 @@
     <div id="progressChannelList" class="progress-channel-list">
       <div class="empty">点击“立即巡检”后显示招聘网站登录态状态。</div>
     </div>
+    <p class="muted progress-login-note">点击渠道的“重新登录”会打开独立窗口。完成登录后等待窗口自动关闭，再点击“立即巡检”验证。</p>
   </div>
 </section>
 <section id="profile" class="section">

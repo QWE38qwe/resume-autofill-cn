@@ -819,6 +819,11 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .progress-channel strong { font-size: 14px; }
 .progress-channel small, .progress-channel p { color: var(--caption); font-size: 11px; }
 .progress-channel p { margin: 9px 0 0; }
+.progress-login { margin-top: 10px; padding: 5px 9px; font-size: 11px; }
+.progress-login-note { margin: 14px 0 0; font-size: 11px; }
+.compact-toggle { display: inline-flex; align-items: center; gap: 7px; color: #d9e9e6; font-size: 12px; white-space: nowrap; }
+.compact-toggle input { accent-color: #75cbb0; width: 16px; height: 16px; }
+.mail-hero-actions select { min-height: 36px; border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 0 9px; color: #fff; background: rgba(0,0,0,.14); }
 
 .settings-card { max-width: 780px; }
 .settings-actions { justify-content: space-between; margin-top: 20px; }

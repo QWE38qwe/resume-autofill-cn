@@ -1,6 +1,7 @@
 const defaultAiRules = [];
 const MAIL_NATIVE_HOST = "cn.local.jianfill.mail";
 const MAIL_ALARM = "jianfill-mail-sync";
+const PROGRESS_ALARM = "jianfill-progress-monitor";
 const NATIVE_MESSAGE_TIMEOUT_MS = 5 * 60 * 1000;
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -49,6 +50,9 @@ chrome.runtime.onInstalled.addListener(async () => {
     receivedAtField: "开始日期",
     subjectField: "最新进展记录",
     cookieStatusField: "Cookie状态",
+    cookieCheckedAtField: "Cookie最近检测",
+    progressAutoSync: true,
+    progressIntervalMinutes: 720,
     ...currentMailSettings
   };
   delete payload.mailSettings.dryRun;
@@ -57,6 +61,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
   await chrome.storage.local.set(payload);
   await scheduleMailSync(payload.mailSettings);
+  await scheduleProgressMonitor(payload.mailSettings);
 });
 
 function chatEndpoint(apiBase) {
@@ -285,6 +290,13 @@ async function scheduleMailSync(mailSettings = {}) {
   await chrome.alarms.create(MAIL_ALARM, { periodInMinutes });
 }
 
+async function scheduleProgressMonitor(mailSettings = {}) {
+  await chrome.alarms.clear(PROGRESS_ALARM);
+  if (mailSettings.progressAutoSync === false) return;
+  const periodInMinutes = Math.max(30, Number(mailSettings.progressIntervalMinutes) || 720);
+  await chrome.alarms.create(PROGRESS_ALARM, { periodInMinutes });
+}
+
 function mailPayload(mailSettings, settings) {
   const providers = activeAiProviders(settings);
   const primary = providers[0] || {};
@@ -323,7 +335,8 @@ function mailPayload(mailSettings, settings) {
       parentField: mailSettings.parentField || "父记录",
       receivedAtField: mailSettings.receivedAtField || "开始日期",
       subjectField: mailSettings.subjectField || "最新进展记录",
-      cookieStatusField: mailSettings.cookieStatusField || "Cookie状态"
+      cookieStatusField: mailSettings.cookieStatusField || "Cookie状态",
+      cookieCheckedAtField: mailSettings.cookieCheckedAtField || "Cookie最近检测"
     }
   };
 }
@@ -423,14 +436,27 @@ async function monitorProgress() {
   }
 }
 
+async function startProgressLogin(channelId) {
+  const { mailSettings = {}, settings = {} } =
+    await chrome.storage.local.get(["mailSettings", "settings"]);
+  const response = await sendNativeMessage({
+    ...mailPayload(mailSettings, settings),
+    action: "startProgressLogin",
+    channelId
+  });
+  if (!response.ok) throw new Error(response.error || "无法启动登录窗口");
+  return response;
+}
+
 chrome.runtime.onStartup.addListener(async () => {
   const { mailSettings = {} } = await chrome.storage.local.get(["mailSettings"]);
   await scheduleMailSync(mailSettings);
+  await scheduleProgressMonitor(mailSettings);
 });
 
 chrome.alarms.onAlarm.addListener(alarm => {
-  if (alarm.name !== MAIL_ALARM) return;
-  syncMail({ source: "alarm" }).catch(() => {});
+  if (alarm.name === MAIL_ALARM) syncMail({ source: "alarm" }).catch(() => {});
+  if (alarm.name === PROGRESS_ALARM) monitorProgress().catch(() => {});
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -455,7 +481,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message.type === "MAIL_SETTINGS_CHANGED") {
-    scheduleMailSync(message.mailSettings || {})
+    Promise.all([
+      scheduleMailSync(message.mailSettings || {}),
+      scheduleProgressMonitor(message.mailSettings || {})
+    ])
       .then(() => sendResponse({ ok: true }))
       .catch(error => sendResponse({ ok: false, error: error.message }));
     return true;
@@ -476,6 +505,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     monitorProgress().then(sendResponse).catch(error => sendResponse({
       ok: false,
       error: error.message || "进展巡检失败"
+    }));
+    return true;
+  }
+  if (message.type === "PROGRESS_LOGIN") {
+    startProgressLogin(message.channelId).then(sendResponse).catch(error => sendResponse({
+      ok: false,
+      error: error.message || "无法启动登录窗口"
     }));
     return true;
   }

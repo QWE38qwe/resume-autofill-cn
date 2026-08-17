@@ -6,7 +6,10 @@ from job_email_assistant.progress_monitor import Channel, ChannelStatus, run_mon
 
 class FakeFeishu:
     def __init__(self):
-        self.settings = SimpleNamespace(feishu_cookie_status_field="Cookie状态")
+        self.settings = SimpleNamespace(
+            feishu_cookie_status_field="Cookie状态",
+            feishu_cookie_checked_at_field="Cookie最近检测",
+        )
         self.records = [
             BaseRecord("byte-parent", {"公司": "字节跳动"}),
             BaseRecord("shokz-parent", {"公司": "韶音科技"}),
@@ -44,7 +47,6 @@ def test_monitor_writes_cookie_status_to_matching_parent(monkeypatch):
     result = run_monitor(feishu)
 
     assert result["updated"] == 2
-    assert feishu.updates == [
-        ("byte-parent", {"Cookie状态": "生效中"}),
-        ("shokz-parent", {"Cookie状态": "已过期"}),
-    ]
+    assert [record_id for record_id, _ in feishu.updates] == ["byte-parent", "shokz-parent"]
+    assert [fields["Cookie状态"] for _, fields in feishu.updates] == ["生效中", "已过期"]
+    assert all(isinstance(fields["Cookie最近检测"], int) for _, fields in feishu.updates)

@@ -135,6 +135,7 @@ class FeishuBaseClient:
             self.settings.feishu_received_at_field,
             self.settings.feishu_subject_field,
             self.settings.feishu_cookie_status_field,
+            self.settings.feishu_cookie_checked_at_field,
         }
         missing = required - actual
         if missing:
