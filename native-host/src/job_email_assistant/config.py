@@ -49,6 +49,7 @@ class Settings:
     feishu_subject_field: str
     feishu_cookie_status_field: str
     feishu_cookie_checked_at_field: str
+    feishu_monitor_enabled_field: str
     poll_interval_minutes: int
     state_db_path: Path
     log_level: str
@@ -103,6 +104,9 @@ class Settings:
             ),
             feishu_cookie_checked_at_field=os.getenv(
                 "FEISHU_COOKIE_CHECKED_AT_FIELD", "Cookie最近检测"
+            ),
+            feishu_monitor_enabled_field=os.getenv(
+                "FEISHU_MONITOR_ENABLED_FIELD", "是否巡检"
             ),
             poll_interval_minutes=int(os.getenv("POLL_INTERVAL_MINUTES", "720")),
             state_db_path=Path(os.getenv("STATE_DB_PATH", "./data/state.db")).expanduser(),
@@ -176,6 +180,9 @@ class Settings:
             ),
             feishu_cookie_checked_at_field=str(
                 feishu.get("cookieCheckedAtField") or "Cookie最近检测"
+            ),
+            feishu_monitor_enabled_field=str(
+                feishu.get("monitorEnabledField") or "是否巡检"
             ),
             poll_interval_minutes=max(30, int(payload.get("pollIntervalMinutes") or 720)),
             state_db_path=state_db_path,

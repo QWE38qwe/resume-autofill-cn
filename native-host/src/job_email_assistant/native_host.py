@@ -11,7 +11,7 @@ from typing import Any, BinaryIO
 from . import __version__
 from .config import Settings
 from .feishu import FeishuBaseClient
-from .progress_monitor import run_monitor, start_login
+from .progress_monitor import run_monitor, save_chrome_cookies, start_login
 from .service import SyncService
 from .state import StateStore
 
@@ -122,11 +122,16 @@ def handle(message: dict[str, Any]) -> dict[str, Any]:
         settings = Settings.from_payload(message, STATE_DB)
         feishu = FeishuBaseClient(settings)
         try:
-            return run_monitor(feishu)
+            return run_monitor(feishu, str(message.get("channelId") or "") or None)
         finally:
             feishu.close()
     if action == "startProgressLogin":
         return start_login(str(message.get("channelId") or ""))
+    if action == "saveProgressCookies":
+        cookies = message.get("cookies")
+        if not isinstance(cookies, list):
+            raise ValueError("无效的浏览器会话数据")
+        return save_chrome_cookies(str(message.get("channelId") or ""), cookies)
     if action != "sync":
         raise ValueError(f"Unsupported action: {action}")
 

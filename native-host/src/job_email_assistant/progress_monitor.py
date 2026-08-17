@@ -16,7 +16,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
 
-from .feishu import FeishuBaseClient
+from .feishu import FeishuBaseClient, has_link_value, normalize_company
 
 
 TRACKER_ROOT = Path(__file__).resolve().parents[2] / "tracker"
@@ -81,6 +81,9 @@ CHANNELS = (
         "https://xiaomi.jobs.f.mioffice.cn/internship/position/application",
         ("/login", "passport.feishu.cn", "passport.mioffice.cn"),
         (
+            'text=投递简历',
+            'text=评估中',
+            'text=第 1 志愿',
             '[data-testid*="application-item"]',
             '[class*="application-list"] [class*="item"]',
             '[class*="delivery-list"] [class*="item"]',
@@ -121,9 +124,15 @@ CHANNELS = (
         "jd",
         "京东",
         "京东",
-        "https://campus.jd.com/#/personalCenter/deliveryRecord",
+        "https://campus.jd.com/#/myDeliver?type=present",
         ("/login", "passport.jd.com", "plogin"),
-        ('[class*="delivery"] [class*="item"]', '[class*="application"] [class*="item"]'),
+        (
+            "text=网申投递",
+            "text=投递详情",
+            "text=简历筛选",
+            '[class*="delivery"] [class*="item"]',
+            '[class*="application"] [class*="item"]',
+        ),
         ("text=暂无投递记录", "text=暂无应聘记录", '[class*="empty"]'),
     ),
     Channel(
@@ -296,10 +305,71 @@ def start_login(channel_id: str) -> dict[str, str]:
     return {"ok": True, "channelId": channel.channel_id, "name": channel.name}
 
 
-def run_monitor(feishu: FeishuBaseClient) -> dict[str, Any]:
+def save_chrome_cookies(channel_id: str, cookies: list[dict[str, Any]]) -> dict[str, Any]:
+    channel = get_channel(channel_id)
+    if not cookies:
+        raise ValueError("未读取到登录会话，请先在当前 Chrome 标签页完成登录")
+    normalized = []
+    for cookie in cookies:
+        same_site = str(cookie.get("sameSite") or "").lower()
+        normalized.append({
+            "name": str(cookie["name"]),
+            "value": str(cookie["value"]),
+            "domain": str(cookie["domain"]),
+            "path": str(cookie.get("path") or "/"),
+            "expires": float(cookie.get("expirationDate") or -1),
+            "httpOnly": bool(cookie.get("httpOnly")),
+            "secure": bool(cookie.get("secure")),
+            "sameSite": {
+                "no_restriction": "None",
+                "lax": "Lax",
+                "strict": "Strict",
+            }.get(same_site, "Lax"),
+        })
+    AuthStore(TRACKER_ROOT / "state" / "auth").save(
+        channel.channel_id, {"cookies": normalized, "origins": []}
+    )
+    return {"ok": True, "channelId": channel.channel_id, "name": channel.name, "cookies": len(normalized)}
+
+
+def _monitor_enabled(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, list):
+        return any(_monitor_enabled(item) for item in value)
+    return str(value or "").strip().casefold() in {"是", "yes", "true", "1"}
+
+
+def _link_from_record(record: Any, field_name: str) -> str:
+    value = record.fields.get(field_name)
+    if isinstance(value, dict):
+        return str(value.get("link") or value.get("url") or "")
+    return str(value or "") if isinstance(value, str) else ""
+
+
+def enabled_channels(feishu: FeishuBaseClient, records: list[Any]) -> list[Channel]:
+    enabled_companies = {
+        normalize_company(str(record.fields.get(feishu.settings.feishu_company_field) or ""))
+        for record in records
+        if not has_link_value(record.fields.get(feishu.settings.feishu_parent_field))
+        and _monitor_enabled(record.fields.get(feishu.settings.feishu_monitor_enabled_field))
+    }
+    return [
+        channel for channel in CHANNELS
+        if normalize_company(channel.company) in enabled_companies
+    ]
+
+
+def run_monitor(feishu: FeishuBaseClient, channel_id: str | None = None) -> dict[str, Any]:
     auth_store = AuthStore(TRACKER_ROOT / "state" / "auth")
     records = feishu.list_records()
-    statuses = [check_channel(channel, auth_store) for channel in CHANNELS]
+    channels = enabled_channels(feishu, records)
+    if channel_id:
+        channel = get_channel(channel_id)
+        if channel not in channels:
+            raise ValueError("请先在飞书该公司主记录中将“是否巡检”设为“是”")
+        channels = [channel]
+    statuses = [check_channel(channel, auth_store) for channel in channels]
     checked_at = int(time.time() * 1000)
     updated = 0
     for channel_status in statuses:
@@ -313,8 +383,15 @@ def run_monitor(feishu: FeishuBaseClient) -> dict[str, Any]:
                 },
             )
             updated += 1
+    channel_data = []
+    for status in statuses:
+        channel = get_channel(status.channel_id)
+        channel_data.append({
+            **status.to_dict(),
+            "applicationUrl": channel.applications_url,
+        })
     return {
         "ok": True,
         "updated": updated,
-        "channels": [item.to_dict() for item in statuses],
+        "channels": channel_data,
     }

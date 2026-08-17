@@ -1237,6 +1237,7 @@ function mailSettingsDefaults() {
     subjectField: "最新进展记录",
     cookieStatusField: "Cookie状态",
     cookieCheckedAtField: "Cookie最近检测",
+    monitorEnabledField: "是否巡检",
     progressAutoSync: true,
     progressIntervalMinutes: 720
   };
@@ -1312,6 +1313,7 @@ function mailSettingsFromForm() {
     subjectField: $("#mailSubjectField").value.trim() || "最新进展记录",
     cookieStatusField: $("#mailCookieStatusField").value.trim() || "Cookie状态",
     cookieCheckedAtField: "Cookie最近检测",
+    monitorEnabledField: "是否巡检",
     progressAutoSync: $("#progressAutoSync").checked,
     progressIntervalMinutes: Math.max(30, Math.round(Number($("#progressIntervalHours").value || 12) * 60)),
     autoSync: $("#mailAutoSync").checked,
@@ -1367,17 +1369,29 @@ function renderProgressMonitor() {
     $("#progressLastRun").textContent = "尚未巡检";
   }
 
-  const channels = monitor.channels || [];
-  $("#progressChannelList").innerHTML = channels.length ? channels.map(channel => `
-    <div class="progress-channel">
-      <div class="progress-channel-head">
-        <div><strong>${safe(channel.name)}</strong><small>${safe(channel.company)}</small></div>
-        <span class="progress-state ${progressStatusClass(channel.status)}">${safe(channel.status)}</span>
-      </div>
-      <p>${safe(channel.detail || "暂无详情")}</p>
-      <button class="btn ghost progress-login" data-channel-id="${safeAttr(channel.channel_id)}">重新登录</button>
-    </div>
-  `).join("") : '<div class="empty">点击“立即巡检”后显示招聘网站登录态状态。</div>';
+  const keyword = ($("#progressCompanyFilter")?.value || "").trim().toLocaleLowerCase();
+  const statuses = [...document.querySelectorAll("#progressStatusFilters input:checked")]
+    .map(input => input.value);
+  $("#progressStatusFilterSummary").textContent = statuses.length
+    ? `已选 ${statuses.length} 个状态`
+    : "全部状态";
+  const channels = (monitor.channels || []).filter(channel =>
+    (!keyword || `${channel.name} ${channel.company}`.toLocaleLowerCase().includes(keyword)) &&
+    (!statuses.length || statuses.includes(channel.status))
+  );
+  $("#progressChannelList").innerHTML = channels.length ? `
+    <div class="progress-table-wrap"><table class="progress-table">
+      <thead><tr><th>公司</th><th>状态</th><th>投递链接</th><th>最近检测</th><th>操作</th></tr></thead>
+      <tbody>${channels.map(channel => `
+        <tr>
+          <td><strong>${safe(channel.name)}</strong><small>${safe(channel.detail || "")}</small></td>
+          <td><span class="progress-state ${progressStatusClass(channel.status)}">${safe(channel.status)}</span></td>
+          <td>${httpUrl(channel.applicationUrl) ? `<a class="mail-open" href="${safeAttr(httpUrl(channel.applicationUrl))}" target="_blank" rel="noopener">打开投递 ↗</a>` : '<span class="cell-empty">—</span>'}</td>
+          <td>${monitor.finishedAt ? safe(formatMailTime(monitor.finishedAt)) : '<span class="cell-empty">—</span>'}</td>
+          <td class="progress-actions"><button class="icon-button progress-check" title="仅巡检此公司" data-channel-id="${safeAttr(channel.channel_id)}" ${monitor.runningChannelId === channel.channel_id ? "disabled" : ""}>↻</button><button class="btn ghost progress-chrome-login" data-channel-id="${safeAttr(channel.channel_id)}">Chrome 登录</button><button class="btn ghost progress-save-session" data-channel-id="${safeAttr(channel.channel_id)}">保存会话</button></td>
+        </tr>
+      `).join("")}</tbody>
+    </table></div>` : '<div class="empty">在飞书公司主记录中将“是否巡检”设为“是”，再点击“立即巡检”。</div>';
   updateProgressBridge(
     monitor.state === "success" ? "success" : monitor.state === "error" ? "error" : "idle",
     monitor.state === "success" ? "本机巡检完成" : monitor.state === "error" ? "巡检失败" : "等待巡检"
@@ -1537,7 +1551,64 @@ $("#runProgressMonitor").addEventListener("click", async () => {
 
 $("#progressAutoSync").addEventListener("change", () => persistMailSettings(false).catch(error => alert(error.message)));
 $("#progressIntervalHours").addEventListener("change", () => persistMailSettings(false).catch(error => alert(error.message)));
+$("#progressCompanyFilter").addEventListener("input", renderProgressMonitor);
+$("#progressStatusFilters").addEventListener("change", renderProgressMonitor);
 $("#progressChannelList").addEventListener("click", async event => {
+  const checkButton = event.target.closest(".progress-check");
+  if (checkButton) {
+    checkButton.disabled = true;
+    try {
+      const result = await chrome.runtime.sendMessage({
+        type: "PROGRESS_MONITOR",
+        channelId: checkButton.dataset.channelId
+      });
+      if (!result?.ok) throw new Error(result?.error || "进展巡检失败");
+      db.progressMonitorStatus = result;
+    } catch (error) {
+      alert(error.message || "进展巡检失败");
+    } finally {
+      checkButton.disabled = false;
+    }
+    return;
+  }
+  const chromeLoginButton = event.target.closest(".progress-chrome-login");
+  if (chromeLoginButton) {
+    chromeLoginButton.disabled = true;
+    try {
+      const allowed = await chrome.permissions.request({
+        origins: ["https://*/*", "http://*/*"]
+      });
+      if (!allowed) throw new Error("需要允许招聘网站访问权限，才能保存登录后的会话");
+      const result = await chrome.runtime.sendMessage({
+        type: "PROGRESS_CHROME_LOGIN",
+        channelId: chromeLoginButton.dataset.channelId
+      });
+      if (!result?.ok) throw new Error(result?.error || "无法打开登录页面");
+      alert("已在当前 Chrome 打开招聘网站。请完成登录和验证码后，回到此页点击“保存会话”。");
+    } catch (error) {
+      alert(error.message || "无法打开登录页面");
+    } finally {
+      chromeLoginButton.disabled = false;
+    }
+    return;
+  }
+  const saveSessionButton = event.target.closest(".progress-save-session");
+  if (saveSessionButton) {
+    saveSessionButton.disabled = true;
+    try {
+      const result = await chrome.runtime.sendMessage({
+        type: "PROGRESS_SAVE_CHROME_SESSION",
+        channelId: saveSessionButton.dataset.channelId
+      });
+      if (!result?.ok) throw new Error(result?.error || "保存登录会话失败");
+      alert(`已加密保存 ${result.name} 的 ${result.cookies} 个会话 Cookie。现在可点击刷新验证。`);
+    } catch (error) {
+      alert(error.message || "保存登录会话失败");
+    } finally {
+      saveSessionButton.disabled = false;
+    }
+    return;
+  }
   const button = event.target.closest(".progress-login");
   if (!button) return;
   button.disabled = true;

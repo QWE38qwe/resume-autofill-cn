@@ -106,10 +106,22 @@
       <span class="progress-state failed">读取失败</span>
       <span class="progress-state unconfigured">未配置</span>
     </div>
+    <div class="progress-filters">
+      <label class="progress-search"><span>⌕</span><input id="progressCompanyFilter" type="search" placeholder="搜索公司"></label>
+      <details id="progressStatusFilters" class="progress-status-menu">
+        <summary id="progressStatusFilterSummary">全部状态</summary>
+        <div class="progress-status-options" aria-label="按状态筛选">
+          <label><input type="checkbox" value="生效中"> 生效中</label>
+          <label><input type="checkbox" value="已过期"> 已过期</label>
+          <label><input type="checkbox" value="读取失败"> 读取失败</label>
+          <label><input type="checkbox" value="未配置"> 未配置</label>
+        </div>
+      </details>
+    </div>
     <div id="progressChannelList" class="progress-channel-list">
       <div class="empty">点击“立即巡检”后显示招聘网站登录态状态。</div>
     </div>
-    <p class="muted progress-login-note">点击渠道的“重新登录”会打开独立窗口。完成登录后等待窗口自动关闭，再点击“立即巡检”验证。</p>
+    <p class="muted progress-login-note">点击“Chrome 登录”后在当前浏览器完成密码自动填充、验证码或扫码，再点击“保存会话”并使用刷新按钮验证。</p>
   </div>
 </section>
 <section id="profile" class="section">

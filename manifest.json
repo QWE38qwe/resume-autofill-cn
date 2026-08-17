@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "简填 - 网申自动填充",
-  "version": "0.13.0",
+  "version": "0.15.0",
   "description": "简历自动填充、邮件邀约识别与飞书待办同步",
   "homepage_url": "https://github.com/QWE38qwe/resume-autofill-cn",
-  "permissions": ["storage", "activeTab", "scripting", "nativeMessaging", "alarms"],
+  "permissions": ["storage", "activeTab", "scripting", "nativeMessaging", "alarms", "cookies"],
   "host_permissions": ["https://api.deepseek.com/*"],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
   "action": {"default_popup": "popup.html", "default_title": "简填"},
