@@ -207,6 +207,7 @@ async function init() {
     $("#localConfigStatus").textContent = "已从本地 .env 导入邮件、飞书和模型配置。";
   }
   renderMailDashboard();
+  renderProgressMonitor();
 
   $("#hobbiesText").value = db.hobbies || "";
   const settings = db.settings || {};
@@ -1233,7 +1234,8 @@ function mailSettingsDefaults() {
     ddlField: "ddl",
     parentField: "父记录",
     receivedAtField: "开始日期",
-    subjectField: "最新进展记录"
+    subjectField: "最新进展记录",
+    cookieStatusField: "Cookie状态"
   };
 }
 
@@ -1258,6 +1260,7 @@ function renderMailSettings() {
   $("#mailParentField").value = settings.parentField;
   $("#mailReceivedAtField").value = settings.receivedAtField;
   $("#mailSubjectField").value = settings.subjectField;
+  $("#mailCookieStatusField").value = settings.cookieStatusField;
   $("#mailAutoSync").checked = Boolean(settings.autoSync);
   $("#mailSyncIntervalHours").value = Number(settings.syncIntervalMinutes) / 60;
   $("#mailLookbackHours").value = settings.lookbackHours;
@@ -1302,6 +1305,7 @@ function mailSettingsFromForm() {
     parentField: $("#mailParentField").value.trim() || "父记录",
     receivedAtField: $("#mailReceivedAtField").value.trim() || "开始日期",
     subjectField: $("#mailSubjectField").value.trim() || "最新进展记录",
+    cookieStatusField: $("#mailCookieStatusField").value.trim() || "Cookie状态",
     autoSync: $("#mailAutoSync").checked,
     syncIntervalMinutes: Math.round(syncIntervalHours * 60),
     lookbackHours
@@ -1325,6 +1329,50 @@ function updateBridgeState(state, text) {
   const node = $("#mailBridgeStatus");
   node.className = `bridge-state ${state}`;
   node.innerHTML = `<i></i>${safe(text)}`;
+}
+
+function progressStatusClass(status) {
+  return {
+    "生效中": "live",
+    "已过期": "expired",
+    "读取失败": "failed",
+    "未配置": "unconfigured"
+  }[status] || "unconfigured";
+}
+
+function updateProgressBridge(state, text) {
+  const node = $("#progressBridgeStatus");
+  node.className = `bridge-state ${state}`;
+  node.innerHTML = `<i></i>${safe(text)}`;
+}
+
+function renderProgressMonitor() {
+  const monitor = db.progressMonitorStatus || {};
+  $("#progressUpdatedCount").textContent = `本次更新 ${monitor.updated || 0} 条飞书记录`;
+  if (monitor.state === "running") {
+    $("#progressLastRun").textContent = "正在读取招聘网站投递页…";
+  } else if (monitor.state === "error") {
+    $("#progressLastRun").textContent = `巡检失败：${monitor.error || "未知错误"}`;
+  } else if (monitor.finishedAt) {
+    $("#progressLastRun").textContent = `最近巡检 ${formatMailTime(monitor.finishedAt)}`;
+  } else {
+    $("#progressLastRun").textContent = "尚未巡检";
+  }
+
+  const channels = monitor.channels || [];
+  $("#progressChannelList").innerHTML = channels.length ? channels.map(channel => `
+    <div class="progress-channel">
+      <div class="progress-channel-head">
+        <div><strong>${safe(channel.name)}</strong><small>${safe(channel.company)}</small></div>
+        <span class="progress-state ${progressStatusClass(channel.status)}">${safe(channel.status)}</span>
+      </div>
+      <p>${safe(channel.detail || "暂无详情")}</p>
+    </div>
+  `).join("") : '<div class="empty">点击“立即巡检”后显示招聘网站登录态状态。</div>';
+  updateProgressBridge(
+    monitor.state === "success" ? "success" : monitor.state === "error" ? "error" : "idle",
+    monitor.state === "success" ? "本机巡检完成" : monitor.state === "error" ? "巡检失败" : "等待巡检"
+  );
 }
 
 function mailStatusClass(status) {
@@ -1451,6 +1499,33 @@ $("#syncMailNow").addEventListener("click", async () => {
   }
 });
 
+$("#runProgressMonitor").addEventListener("click", async () => {
+  const button = $("#runProgressMonitor");
+  button.disabled = true;
+  button.textContent = "巡检中…";
+  updateProgressBridge("loading", "正在读取");
+  try {
+    const mailSettings = await persistMailSettings(false);
+    if (!mailSettings.appId || !mailSettings.appSecret) {
+      throw new Error("请先保存飞书写入配置");
+    }
+    const result = await chrome.runtime.sendMessage({ type: "PROGRESS_MONITOR" });
+    if (!result?.ok) throw new Error(result?.error || "进展巡检失败");
+    db.progressMonitorStatus = result;
+    renderProgressMonitor();
+  } catch (error) {
+    db.progressMonitorStatus = {
+      state: "error",
+      error: error.message || "进展巡检失败"
+    };
+    renderProgressMonitor();
+    alert(error.message || "进展巡检失败");
+  } finally {
+    button.disabled = false;
+    button.textContent = "立即巡检";
+  }
+});
+
 $("#retryMailReview").addEventListener("click", async () => {
   const result = await chrome.runtime.sendMessage({ type: "MAIL_RETRY_REVIEW" });
   if (!result?.ok) return alert(result?.error || "重置失败");
@@ -1489,9 +1564,16 @@ $("#importLocalConfig").addEventListener("click", async () => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local" || (!changes.mailHistory && !changes.mailSyncStatus)) return;
+  if (
+    area !== "local" ||
+    (!changes.mailHistory && !changes.mailSyncStatus && !changes.progressMonitorStatus)
+  ) return;
   if (changes.mailHistory) db.mailHistory = changes.mailHistory.newValue || [];
   if (changes.mailSyncStatus) db.mailSyncStatus = changes.mailSyncStatus.newValue || {};
+  if (changes.progressMonitorStatus) {
+    db.progressMonitorStatus = changes.progressMonitorStatus.newValue || {};
+    renderProgressMonitor();
+  }
   renderMailDashboard();
 });
 

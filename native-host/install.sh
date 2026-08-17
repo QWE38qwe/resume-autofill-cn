@@ -4,6 +4,7 @@ set -euo pipefail
 HOST_NAME="cn.local.jianfill.mail"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_ROOT="$HOME/Library/Application Support/Jianfill Mail Host"
+TRACKER_AUTH_SOURCE="$HOME/Documents/trae_projects/feishucli/autotrack/state/auth"
 EXTENSION_ID="${1:-}"
 
 if [[ ! "$EXTENSION_ID" =~ ^[a-p]{32}$ ]]; then
@@ -20,6 +21,10 @@ fi
 mkdir -p "$INSTALL_ROOT"
 /usr/bin/ditto "$ROOT/src" "$INSTALL_ROOT/src"
 cp "$ROOT/pyproject.toml" "$ROOT/uv.lock" "$ROOT/run-host.sh" "$INSTALL_ROOT/"
+mkdir -p "$INSTALL_ROOT/tracker/state/auth"
+if [[ -d "$TRACKER_AUTH_SOURCE" ]]; then
+  /usr/bin/ditto "$TRACKER_AUTH_SOURCE" "$INSTALL_ROOT/tracker/state/auth"
+fi
 if [[ -f "$ROOT/.env" ]]; then
   cp "$ROOT/.env" "$INSTALL_ROOT/.env"
   chmod 600 "$INSTALL_ROOT/.env"
@@ -27,6 +32,7 @@ fi
 
 cd "$INSTALL_ROOT"
 uv sync
+uv run playwright install chromium
 chmod 700 "$INSTALL_ROOT/run-host.sh"
 "$INSTALL_ROOT/.venv/bin/python" \
   -m job_email_assistant.export_local_config \

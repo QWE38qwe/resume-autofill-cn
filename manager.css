@@ -724,6 +724,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .mail-hero-actions { position: relative; z-index: 1; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .mail-hero .btn.secondary { border-color: rgba(255, 255, 255, .2); background: rgba(255, 255, 255, .08); color: #fff; }
 .mail-hero .btn.primary { background: #75cbb0; color: #15312f; box-shadow: none; }
+.progress-hero { background: linear-gradient(135deg, #1b2e38, #24515a); }
+.progress-hero .section-kicker { color: #8ed3df; }
 
 .bridge-state {
   display: inline-flex;
@@ -789,6 +791,35 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .mail-open { display: block; margin-top: 3px; color: var(--accent); font-size: 10px; text-decoration: none; }
 .field-chip.danger { background: #f9e8e6; color: var(--danger); }
 
+.progress-board-surface { max-width: 980px; }
+.progress-legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 15px; }
+.progress-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.progress-state.live { background: #e4f3ea; color: var(--success); }
+.progress-state.expired { background: #fff1dd; color: var(--warning); }
+.progress-state.failed { background: #f9e8e6; color: var(--danger); }
+.progress-state.unconfigured { background: #edf0ed; color: var(--caption); }
+.progress-channel-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.progress-channel {
+  min-height: 104px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fafbf7;
+}
+.progress-channel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.progress-channel strong, .progress-channel small { display: block; }
+.progress-channel strong { font-size: 14px; }
+.progress-channel small, .progress-channel p { color: var(--caption); font-size: 11px; }
+.progress-channel p { margin: 9px 0 0; }
+
 .settings-card { max-width: 780px; }
 .settings-actions { justify-content: space-between; margin-top: 20px; }
 
@@ -852,7 +883,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   .history-table th { font-size: 9px; }
   .history-table td, .version-cell, .time-cell { font-size: 9px; }
   .table-action { padding-inline: 3px; font-size: 9px; }
-  .sync-preferences, .mail-metrics, .mail-filters { grid-template-columns: 1fr; }
+  .sync-preferences, .mail-metrics, .mail-filters, .progress-channel-list { grid-template-columns: 1fr; }
   .mail-hero { padding: 22px; }
   .mail-table-wrap { overflow-x: auto; }
   .mail-table { min-width: 640px; }

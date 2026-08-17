@@ -4,6 +4,10 @@ Native Messaging Host 负责在本机连接 IMAP、调用用户配置的
 OpenAI-compatible 模型，并更新飞书多维表格。扩展通过标准输入输出传递单次
 请求，桥接不会监听网络端口。
 
+投递进展巡检使用 Playwright 只读已登录招聘网站的投递页，并更新飞书
+`Cookie状态`。首次安装会准备 Chromium；若存在本机 `autotrack` 加密登录态，
+安装脚本会复制密文到运行目录，密钥仍只保存在 macOS Keychain。
+
 ## 安装
 
 1. 在 `chrome://extensions` 开启开发者模式并加载插件根目录。

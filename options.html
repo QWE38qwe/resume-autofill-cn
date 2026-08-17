@@ -19,6 +19,7 @@
       <nav id="nav" aria-label="主导航">
         <button data-tab="home" class="active" title="概览"><span class="nav-icon">⌂</span><span class="nav-label">概览</span></button>
         <button data-tab="mail" title="邮件待办"><span class="nav-icon">邮</span><span class="nav-label">邮件待办</span></button>
+        <button data-tab="progress" title="投递进展"><span class="nav-icon">进</span><span class="nav-label">投递进展</span></button>
         <button data-tab="profile" title="个人资料"><span class="nav-icon">人</span><span class="nav-label">个人资料</span></button>
         <button data-tab="growth" title="教育背景"><span class="nav-icon">学</span><span class="nav-label">教育背景</span></button>
         <button data-tab="versions" title="简历版本"><span class="nav-icon">版</span><span class="nav-label">简历版本</span></button>
@@ -78,6 +79,34 @@
       <select id="mailCategoryFilter"><option value="">全部分类</option><option>在线测评</option><option>ai面试</option><option>面试邀约</option></select>
     </div>
     <div id="mailHistoryTable"><div class="empty">同步后会显示读取过的邮件及处理结果</div></div>
+  </div>
+</section>
+<section id="progress" class="section">
+  <div class="mail-hero progress-hero">
+    <div>
+      <span class="section-kicker">APPLICATION PULSE</span>
+      <h1>投递进展</h1>
+      <p>仅读取已登录招聘网站的投递页，并同步登录态可用状态。</p>
+    </div>
+    <div class="mail-hero-actions">
+      <span class="bridge-state" id="progressBridgeStatus"><i></i>等待巡检</span>
+      <button class="btn primary" id="runProgressMonitor">立即巡检</button>
+    </div>
+  </div>
+  <div class="surface progress-board-surface">
+    <div class="surface-head">
+      <div><span class="section-kicker">本机登录态</span><h2>渠道状态</h2><p id="progressLastRun">尚未巡检</p></div>
+      <span class="muted" id="progressUpdatedCount">本次更新 0 条飞书记录</span>
+    </div>
+    <div class="progress-legend">
+      <span class="progress-state live">生效中</span>
+      <span class="progress-state expired">已过期</span>
+      <span class="progress-state failed">读取失败</span>
+      <span class="progress-state unconfigured">未配置</span>
+    </div>
+    <div id="progressChannelList" class="progress-channel-list">
+      <div class="empty">点击“立即巡检”后显示招聘网站登录态状态。</div>
+    </div>
   </div>
 </section>
 <section id="profile" class="section">
@@ -202,6 +231,7 @@
         <div class="field"><label for="mailParentField">父记录字段</label><input id="mailParentField" value="父记录"></div>
         <div class="field"><label for="mailReceivedAtField">邮件时间字段</label><input id="mailReceivedAtField" value="开始日期"></div>
         <div class="field"><label for="mailSubjectField">邮件主题字段</label><input id="mailSubjectField" value="最新进展记录"></div>
+        <div class="field"><label for="mailCookieStatusField">Cookie 状态字段</label><input id="mailCookieStatusField" value="Cookie状态"></div>
       </div>
     </details>
   </div>

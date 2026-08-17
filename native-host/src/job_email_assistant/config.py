@@ -47,6 +47,7 @@ class Settings:
     feishu_parent_field: str
     feishu_received_at_field: str
     feishu_subject_field: str
+    feishu_cookie_status_field: str
     poll_interval_minutes: int
     state_db_path: Path
     log_level: str
@@ -95,6 +96,9 @@ class Settings:
             ),
             feishu_subject_field=os.getenv(
                 "FEISHU_SUBJECT_FIELD", "最新进展记录"
+            ),
+            feishu_cookie_status_field=os.getenv(
+                "FEISHU_COOKIE_STATUS_FIELD", "Cookie状态"
             ),
             poll_interval_minutes=int(os.getenv("POLL_INTERVAL_MINUTES", "720")),
             state_db_path=Path(os.getenv("STATE_DB_PATH", "./data/state.db")).expanduser(),
@@ -162,6 +166,9 @@ class Settings:
             ),
             feishu_subject_field=str(
                 feishu.get("subjectField") or "最新进展记录"
+            ),
+            feishu_cookie_status_field=str(
+                feishu.get("cookieStatusField") or "Cookie状态"
             ),
             poll_interval_minutes=max(30, int(payload.get("pollIntervalMinutes") or 720)),
             state_db_path=state_db_path,

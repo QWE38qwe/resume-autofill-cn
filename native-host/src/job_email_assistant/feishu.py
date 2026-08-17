@@ -134,6 +134,7 @@ class FeishuBaseClient:
             self.settings.feishu_parent_field,
             self.settings.feishu_received_at_field,
             self.settings.feishu_subject_field,
+            self.settings.feishu_cookie_status_field,
         }
         missing = required - actual
         if missing:
@@ -198,3 +199,12 @@ class FeishuBaseClient:
             json={"fields": fields},
         )
         return str(data.get("record", {}).get("record_id") or "")
+
+    def update_record_fields(
+        self, record: BaseRecord, fields: dict[str, Any]
+    ) -> None:
+        self._request(
+            "PUT",
+            f"{self._table_path}/records/{record.record_id}",
+            json={"fields": fields},
+        )

@@ -10,6 +10,8 @@ from typing import Any, BinaryIO
 
 from . import __version__
 from .config import Settings
+from .feishu import FeishuBaseClient
+from .progress_monitor import run_monitor
 from .service import SyncService
 from .state import StateStore
 
@@ -89,6 +91,7 @@ def local_config() -> dict[str, Any]:
             "parentField": values.get("FEISHU_PARENT_FIELD") or "父记录",
             "receivedAtField": values.get("FEISHU_RECEIVED_AT_FIELD") or "开始日期",
             "subjectField": values.get("FEISHU_SUBJECT_FIELD") or "最新进展记录",
+            "cookieStatusField": values.get("FEISHU_COOKIE_STATUS_FIELD") or "Cookie状态",
         },
         "aiProvider": {
             "id": "local-env-default",
@@ -115,6 +118,13 @@ def handle(message: dict[str, Any]) -> dict[str, Any]:
         finally:
             state.close()
         return {"ok": True, "cleared": count}
+    if action == "trackProgress":
+        settings = Settings.from_payload(message, STATE_DB)
+        feishu = FeishuBaseClient(settings)
+        try:
+            return run_monitor(feishu)
+        finally:
+            feishu.close()
     if action != "sync":
         raise ValueError(f"Unsupported action: {action}")
 

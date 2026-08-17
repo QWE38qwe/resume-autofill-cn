@@ -48,6 +48,7 @@ chrome.runtime.onInstalled.addListener(async () => {
     parentField: "父记录",
     receivedAtField: "开始日期",
     subjectField: "最新进展记录",
+    cookieStatusField: "Cookie状态",
     ...currentMailSettings
   };
   delete payload.mailSettings.dryRun;
@@ -321,7 +322,8 @@ function mailPayload(mailSettings, settings) {
       ddlField: mailSettings.ddlField || "ddl",
       parentField: mailSettings.parentField || "父记录",
       receivedAtField: mailSettings.receivedAtField || "开始日期",
-      subjectField: mailSettings.subjectField || "最新进展记录"
+      subjectField: mailSettings.subjectField || "最新进展记录",
+      cookieStatusField: mailSettings.cookieStatusField || "Cookie状态"
     }
   };
 }
@@ -386,6 +388,41 @@ async function syncMail({ source = "manual" } = {}) {
   }
 }
 
+async function monitorProgress() {
+  const { mailSettings = {}, settings = {} } =
+    await chrome.storage.local.get(["mailSettings", "settings"]);
+  const startedAt = new Date().toISOString();
+  await chrome.storage.local.set({
+    progressMonitorStatus: { state: "running", startedAt }
+  });
+  try {
+    const response = await sendNativeMessage({
+      ...mailPayload(mailSettings, settings),
+      action: "trackProgress"
+    });
+    if (!response.ok) throw new Error(response.error || "进展巡检失败");
+    const status = {
+      state: "success",
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      updated: response.updated || 0,
+      channels: response.channels || []
+    };
+    await chrome.storage.local.set({ progressMonitorStatus: status });
+    return { ok: true, ...status };
+  } catch (error) {
+    const status = {
+      state: "error",
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      error: error.message || "进展巡检失败",
+      channels: []
+    };
+    await chrome.storage.local.set({ progressMonitorStatus: status });
+    throw error;
+  }
+}
+
 chrome.runtime.onStartup.addListener(async () => {
   const { mailSettings = {} } = await chrome.storage.local.get(["mailSettings"]);
   await scheduleMailSync(mailSettings);
@@ -433,6 +470,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendNativeMessage({ action: "localConfig" })
       .then(sendResponse)
       .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message.type === "PROGRESS_MONITOR") {
+    monitorProgress().then(sendResponse).catch(error => sendResponse({
+      ok: false,
+      error: error.message || "进展巡检失败"
+    }));
     return true;
   }
   if (message.type === "AI_MATCH_FIELDS") {

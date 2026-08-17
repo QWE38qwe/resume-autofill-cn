@@ -1,0 +1,77 @@
+# 跨设备复用招聘网站登录态
+
+## 结论
+
+当前 MVP 不会把 Cookie、招聘网站登录态或 Keychain 密钥同步到
+`chrome.storage.sync`、Google 账号或 Git。
+
+每台设备都需要单独在招聘网站完成一次登录，然后由“简填”的本地巡检功能保存
+加密登录态。扩展会在飞书多维表格的 `Cookie状态` 字段提示可用情况。
+
+## 为什么不能直接复制 Chrome Cookie
+
+- Chrome Cookie 通常受本机系统加密保护，直接复制 Cookie 数据库到另一台设备通常无法使用。
+- 当前登录态文件使用 macOS Keychain 中的密钥加密；复制加密文件但没有本机 Keychain 密钥也无法解密。
+- 直接同步明文 Cookie 会使招聘网站会话在多个设备暴露，失效和排查都更困难。
+
+## 新设备操作步骤
+
+1. 安装简填扩展，并在 `chrome://extensions` 重新加载。
+2. 运行一次本地桥接安装：
+
+   ```bash
+   cd "/Users/bytedance/Desktop/简填插件_V0.4.0"
+   ./native-host/install.sh <扩展ID>
+   ```
+
+3. 在新设备浏览器中打开每个招聘网站并手动登录。
+   验证码、扫码、滑块等必须由本人完成。
+4. 在新设备使用 `autotrack` 的本机登录命令，为每个渠道完成一次登录态保存：
+
+   ```bash
+   cd "/Users/bytedance/Documents/trae_projects/feishucli/autotrack"
+   .venv/bin/python main.py --login <channel_id>
+   ```
+
+   例如：`bytedance`、`xiaomi_feishu`、`shokz`。
+   登录态会被加密保存在：
+
+   ```text
+   ~/Library/Application Support/Jianfill Mail Host/tracker/state/auth/
+   ```
+
+5. 再运行简填的本地桥接安装脚本一次。安装脚本会复制**加密后的**
+   登录态文件到 Native Host 运行目录。
+6. 打开扩展的“投递进展”页，点击“立即巡检”。
+7. 查看飞书多维表格中的 `Cookie状态`：
+
+   - `生效中`：登录态和投递页均可读取。
+   - `已过期`：招聘站要求重新登录。
+   - `读取失败`：登录态存在，但页面结构、网络或站点策略导致无法读取；手动查看投递进展。
+   - `未配置`：此设备尚未保存该渠道登录态。
+
+## 其他设备 AI 的操作边界
+
+可以让其他设备上的 AI 工具协助：
+
+- 安装本地桥接。
+- 读取不含凭据的巡检结果。
+- 提醒需要重新登录的渠道。
+- 调试页面选择器或渠道适配器。
+
+不要让任何工具：
+
+- 输出、上传或提交 Cookie、Storage State、邮箱授权码、飞书密钥、API Key。
+- 复制 macOS Keychain 内容。
+- 绕过招聘网站验证码、扫码或滑块。
+
+## 后续可选方案
+
+若确实需要减少跨设备重复登录，可在后续版本设计“用户设置密码的加密备份包”：
+
+1. 使用独立密码派生密钥加密登录态。
+2. 仅同步密文，不同步 Keychain 密钥和明文 Cookie。
+3. 新设备下载后必须输入同一密码解密。
+4. 每次导入后仍执行“立即巡检”，以确认招聘站是否接受该会话。
+
+该方案需要单独设计密码恢复、失效、撤销和同步存储策略，不属于当前 MVP。
