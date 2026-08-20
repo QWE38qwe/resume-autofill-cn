@@ -83,6 +83,9 @@ Chrome / Edge 中的资料管理、简历版本、字段识别和自动填表可
 
 ## 邮件待办
 
+完整的邮箱授权码、飞书自建应用权限、Base 字段和首次验收流程见
+[邮件同步与飞书 Base 配置](docs/MAIL_SYNC_SETUP.md)。
+
 1. 在管理台左侧进入“设置”。
 2. 填写 126 / 163 邮箱账号和 IMAP 客户端授权码。
 3. 填写飞书 App ID、App Secret、Base Token 和 Table ID。
