@@ -18,6 +18,7 @@ release/
 *.docx
 *.csv
 *.xlsx
+!templates/feishu-base/*.xlsx
 native-host/backups/
 native-host/data/
 native-host/.venv/

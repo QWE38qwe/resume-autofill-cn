@@ -58,10 +58,12 @@
 
 ## 飞书模板
 
-邮件待办和投递进展可使用零数据模板：
-[简填求职追踪模板](https://bytedance.larkoffice.com/base/NY7tbuWraaL8cssuv3ocEydGnQb)。
-模板只保留表、字段、选项和视图结构，不包含维护者的公司记录、邮件、链接或个人资料。
-复制到自己的飞书空间后，在扩展设置中填写自己的 Base Token 和目标 Table ID。
+邮件待办和投递进展可使用仓库内的
+[简填求职追踪模板.xlsx](templates/feishu-base/%E7%AE%80%E5%A1%AB%E6%B1%82%E8%81%8C%E8%BF%BD%E8%B8%AA%E6%A8%A1%E6%9D%BF.xlsx)。
+模板由零记录 Base 导出，仅包含 3 张表的表头，不包含维护者的公司记录、邮件、
+链接或个人资料。导入自己的飞书空间后，按
+[模板说明](templates/feishu-base/README.md) 核对字段类型，再在扩展设置中填写自己的
+Base Token 和目标 Table ID。
 
 ## Windows 支持
 
