@@ -11,7 +11,12 @@ from typing import Any, BinaryIO
 from . import __version__
 from .config import Settings
 from .feishu import FeishuBaseClient
-from .progress_monitor import run_monitor, save_chrome_cookies, start_login
+from .progress_monitor import (
+    record_visible_status,
+    run_monitor,
+    save_chrome_cookies,
+    start_login,
+)
 from .service import SyncService
 from .state import StateStore
 
@@ -118,6 +123,20 @@ def handle(message: dict[str, Any]) -> dict[str, Any]:
         finally:
             state.close()
         return {"ok": True, "cleared": count}
+    if action == "manualMailAction":
+        settings = Settings.from_payload(message, STATE_DB)
+        service = SyncService(settings)
+        try:
+            detail = service.manual_action(
+                str(message.get("messageId") or ""),
+                str(message.get("mailAction") or ""),
+                message.get("mailSnapshot")
+                if isinstance(message.get("mailSnapshot"), dict)
+                else None,
+            )
+        finally:
+            service.close()
+        return {"ok": True, "detail": detail}
     if action == "trackProgress":
         settings = Settings.from_payload(message, STATE_DB)
         feishu = FeishuBaseClient(settings)
@@ -132,6 +151,18 @@ def handle(message: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(cookies, list):
             raise ValueError("无效的浏览器会话数据")
         return save_chrome_cookies(str(message.get("channelId") or ""), cookies)
+    if action == "recordVisibleProgress":
+        settings = Settings.from_payload(message, STATE_DB)
+        feishu = FeishuBaseClient(settings)
+        try:
+            return record_visible_status(
+                feishu,
+                str(message.get("channelId") or ""),
+                str(message.get("status") or ""),
+                str(message.get("detail") or ""),
+            )
+        finally:
+            feishu.close()
     if action != "sync":
         raise ValueError(f"Unsupported action: {action}")
 

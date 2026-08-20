@@ -105,6 +105,32 @@ class ImapMailbox:
                 time.sleep(2**attempt)
         raise RuntimeError("Unreachable retry state")
 
+    def fetch_by_uid(self, uid: str) -> ParsedEmail | None:
+        if not uid:
+            return None
+        for attempt in range(3):
+            try:
+                return self._fetch_by_uid_once(uid)
+            except (imaplib.IMAP4.abort, OSError):
+                if attempt == 2:
+                    raise
+                logger.warning("Transient IMAP failure, retrying (%d/3)", attempt + 1)
+                time.sleep(2**attempt)
+        raise RuntimeError("Unreachable retry state")
+
+    def _fetch_by_uid_once(self, uid: str) -> ParsedEmail | None:
+        with imaplib.IMAP4_SSL(
+            self.settings.mail_host, self.settings.mail_port
+        ) as client:
+            client.login(self.settings.mail_address, self.settings.mail_auth_code)
+            status, _ = client.select(self.settings.mail_folder, readonly=True)
+            if status != "OK":
+                raise RuntimeError(f"Unable to select folder: {self.settings.mail_folder}")
+            status, payload = client.uid("fetch", uid, "(RFC822)")
+            if status != "OK" or not payload or not isinstance(payload[0], tuple):
+                return None
+            return parse_message(payload[0][1], uid)
+
     def _fetch_recent_once(self) -> list[ParsedEmail]:
         now = datetime.now(timezone.utc)
         since = (now - timedelta(hours=self.settings.mail_lookback_hours)).strftime(

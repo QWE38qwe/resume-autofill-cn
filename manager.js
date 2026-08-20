@@ -11,6 +11,23 @@ function safeAttr(value) {
   return safe(value).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+// 轻量 toast：替代串联 alert，避免打断向导式的“保存即验证即回写”流程。
+let toastTimer = null;
+function toast(text, tone = "info") {
+  let host = document.getElementById("toastHost");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "toastHost";
+    host.className = "toast-host";
+    document.body.appendChild(host);
+  }
+  host.className = `toast-host ${tone}`;
+  host.textContent = text;
+  host.classList.add("show");
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => host.classList.remove("show"), tone === "error" ? 5200 : 3200);
+}
+
 function normalizeAiProviders(settings = {}) {
   const providers = Array.isArray(settings.aiProviders) ? settings.aiProviders : [];
   const normalized = providers
@@ -1388,7 +1405,7 @@ function renderProgressMonitor() {
           <td><span class="progress-state ${progressStatusClass(channel.status)}">${safe(channel.status)}</span></td>
           <td>${httpUrl(channel.applicationUrl) ? `<a class="mail-open" href="${safeAttr(httpUrl(channel.applicationUrl))}" target="_blank" rel="noopener">打开投递 ↗</a>` : '<span class="cell-empty">—</span>'}</td>
           <td>${monitor.finishedAt ? safe(formatMailTime(monitor.finishedAt)) : '<span class="cell-empty">—</span>'}</td>
-          <td class="progress-actions"><button class="icon-button progress-check" title="仅巡检此公司" data-channel-id="${safeAttr(channel.channel_id)}" ${monitor.runningChannelId === channel.channel_id ? "disabled" : ""}>↻</button><button class="btn ghost progress-chrome-login" data-channel-id="${safeAttr(channel.channel_id)}">Chrome 登录</button><button class="btn ghost progress-save-session" data-channel-id="${safeAttr(channel.channel_id)}">保存会话</button></td>
+          <td class="progress-actions"><button class="icon-button progress-check" title="仅巡检此公司" data-channel-id="${safeAttr(channel.channel_id)}" ${monitor.runningChannelId === channel.channel_id ? "disabled" : ""}>↻</button><button class="btn ghost progress-chrome-login" data-channel-id="${safeAttr(channel.channel_id)}">① 登录</button><button class="btn primary progress-save-verify" data-channel-id="${safeAttr(channel.channel_id)}">② 连接并验证</button></td>
         </tr>
       `).join("")}</tbody>
     </table></div>` : '<div class="empty">在飞书公司主记录中将“是否巡检”设为“是”，再点击“立即巡检”。</div>';
@@ -1399,7 +1416,7 @@ function renderProgressMonitor() {
 }
 
 function mailStatusClass(status) {
-  if (status === "已写入" || status === "将写入") return "matched";
+  if (status === "已写入" || status === "将写入" || status === "已完成") return "matched";
   if (status === "待确认") return "unmatched";
   if (status === "失败") return "danger";
   return "skipped";
@@ -1420,10 +1437,23 @@ function formatMailTime(value) {
 function filteredMailHistory() {
   const status = $("#mailStatusFilter").value;
   const category = $("#mailCategoryFilter").value;
-  return (db.mailHistory || []).filter(item =>
+  const sort = $("#mailSort").value;
+  const rows = (db.mailHistory || []).filter(item =>
     (status === "__default__" ? item.status !== "已忽略" : (!status || item.status === status)) &&
     (!category || item.category === category)
   );
+  const timestamp = value => {
+    const result = Date.parse(value || "");
+    return Number.isNaN(result) ? null : result;
+  };
+  return rows.sort((left, right) => {
+    const leftValue = sort.startsWith("deadline") ? timestamp(left.deadline) : timestamp(left.receivedAt);
+    const rightValue = sort.startsWith("deadline") ? timestamp(right.deadline) : timestamp(right.receivedAt);
+    if (leftValue == null && rightValue == null) return 0;
+    if (leftValue == null) return 1;
+    if (rightValue == null) return -1;
+    return sort.endsWith("_asc") ? leftValue - rightValue : rightValue - leftValue;
+  });
 }
 
 function renderMailDashboard() {
@@ -1452,7 +1482,7 @@ function renderMailDashboard() {
   $("#mailHistoryTable").innerHTML = `
     <div class="mail-table-wrap">
       <table class="mail-table">
-        <thead><tr><th>状态</th><th>邮件</th><th>分类</th><th>DDL</th><th>接收时间</th></tr></thead>
+        <thead><tr><th>状态</th><th>邮件</th><th>分类</th><th>DDL</th><th>接收时间</th><th>操作</th></tr></thead>
         <tbody>
           ${rows.map(item => {
             const link = httpUrl(item.assessmentUrl);
@@ -1469,6 +1499,7 @@ function renderMailDashboard() {
                   <time>${safe(formatMailTime(item.receivedAt))}</time>
                   ${link ? `<a class="mail-open" href="${safeAttr(link)}" target="_blank" rel="noopener">打开 ↗</a>` : ""}
                 </td>
+                <td><select class="mail-action" data-message-id="${safeAttr(item.messageId)}" aria-label="修改邮件状态"><option value="">修改状态</option><option value="completed">已完成</option><option value="ignored">已忽略</option><option value="confirm_write">确认写入</option></select></td>
               </tr>
             `;
           }).join("")}
@@ -1564,8 +1595,10 @@ $("#progressChannelList").addEventListener("click", async event => {
       });
       if (!result?.ok) throw new Error(result?.error || "进展巡检失败");
       db.progressMonitorStatus = result;
+      renderProgressMonitor();
+      toast(`已刷新，回写飞书 ${result.updated || 0} 条`, "success");
     } catch (error) {
-      alert(error.message || "进展巡检失败");
+      toast(error.message || "进展巡检失败", "error");
     } finally {
       checkButton.disabled = false;
     }
@@ -1584,28 +1617,43 @@ $("#progressChannelList").addEventListener("click", async event => {
         channelId: chromeLoginButton.dataset.channelId
       });
       if (!result?.ok) throw new Error(result?.error || "无法打开登录页面");
-      alert("已在当前 Chrome 打开招聘网站。请完成登录和验证码后，回到此页点击“保存会话”。");
+      toast("已打开招聘网站，请完成登录/验证码，然后点“② 连接并验证”。", "info");
     } catch (error) {
-      alert(error.message || "无法打开登录页面");
+      toast(error.message || "无法打开登录页面", "error");
     } finally {
       chromeLoginButton.disabled = false;
     }
     return;
   }
-  const saveSessionButton = event.target.closest(".progress-save-session");
-  if (saveSessionButton) {
-    saveSessionButton.disabled = true;
+  const saveVerifyButton = event.target.closest(".progress-save-verify");
+  if (saveVerifyButton) {
+    const original = saveVerifyButton.textContent;
+    saveVerifyButton.disabled = true;
+    saveVerifyButton.textContent = "连接中…";
     try {
       const result = await chrome.runtime.sendMessage({
-        type: "PROGRESS_SAVE_CHROME_SESSION",
-        channelId: saveSessionButton.dataset.channelId
+        type: "PROGRESS_SAVE_AND_VERIFY",
+        channelId: saveVerifyButton.dataset.channelId
       });
-      if (!result?.ok) throw new Error(result?.error || "保存登录会话失败");
-      alert(`已加密保存 ${result.name} 的 ${result.cookies} 个会话 Cookie。现在可点击刷新验证。`);
+      if (!result?.ok) throw new Error(result?.error || "保存并验证登录态失败");
+      db.progressMonitorStatus = result;
+      renderProgressMonitor();
+      if (result.verified === false) {
+        // 会话已存上，但验证阶段被拦下（多为未开启巡检）。给出可操作的引导，而非报错。
+        if (result.needsMonitorToggle) {
+          toast(`已保存 ${result.name || ""} 登录态（${result.savedCookies || 0} 条会话）。请在飞书把该公司主记录「是否巡检」设为「是」，再点 ↻ 刷新。`, "info");
+        } else {
+          toast(`已保存登录态，但验证未通过：${result.verifyError || "请稍后重试"}`, "error");
+        }
+      } else {
+        const label = result.status ? `状态：${result.status}` : "已回写飞书";
+        toast(`已连接 ${result.name || ""}（${result.savedCookies || 0} 条会话）· ${label}`, "success");
+      }
     } catch (error) {
-      alert(error.message || "保存登录会话失败");
+      toast(error.message || "保存并验证登录态失败", "error");
     } finally {
-      saveSessionButton.disabled = false;
+      saveVerifyButton.disabled = false;
+      saveVerifyButton.textContent = original;
     }
     return;
   }
@@ -1618,9 +1666,9 @@ $("#progressChannelList").addEventListener("click", async event => {
       channelId: button.dataset.channelId
     });
     if (!result?.ok) throw new Error(result?.error || "无法启动登录窗口");
-    alert(`已打开${result.name}登录窗口。请在 5 分钟内完成登录，窗口会自动保存登录态并关闭；随后点击“立即巡检”。`);
+    toast(`已打开${result.name}登录窗口，请在 5 分钟内完成登录，窗口会自动保存登录态并关闭，随后点“立即巡检”。`, "info");
   } catch (error) {
-    alert(error.message || "无法启动登录窗口");
+    toast(error.message || "无法启动登录窗口", "error");
   } finally {
     button.disabled = false;
   }
@@ -1635,6 +1683,33 @@ $("#retryMailReview").addEventListener("click", async () => {
 $("#goAiSettings")?.addEventListener("click", () => activateTab("api"));
 $("#mailStatusFilter").addEventListener("change", renderMailDashboard);
 $("#mailCategoryFilter").addEventListener("change", renderMailDashboard);
+$("#mailSort").addEventListener("change", renderMailDashboard);
+$("#mailHistoryTable").addEventListener("change", async event => {
+  const select = event.target.closest(".mail-action");
+  if (!select?.value) return;
+  select.disabled = true;
+  try {
+    const result = await chrome.runtime.sendMessage({
+      type: "MAIL_MANUAL_ACTION",
+      messageId: select.dataset.messageId,
+    mailAction: select.value,
+    mailSnapshot: (db.mailHistory || []).find(
+      item => item.messageId === select.dataset.messageId
+    )
+    });
+    if (!result?.ok) throw new Error(result?.error || "邮件操作失败");
+    db.mailHistory = (db.mailHistory || []).map(item =>
+      item.messageId === result.detail.messageId ? { ...item, ...result.detail } : item
+    );
+    await chrome.storage.local.set({ mailHistory: db.mailHistory });
+    renderMailDashboard();
+  } catch (error) {
+    select.value = "";
+    alert(error.message || "邮件操作失败");
+  } finally {
+    select.disabled = false;
+  }
+});
 $("#copyMailInstall").addEventListener("click", async () => {
   await navigator.clipboard.writeText($("#mailInstallCommand").textContent);
   $("#copyMailInstall").textContent = "已复制";

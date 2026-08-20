@@ -75,8 +75,9 @@
       <div><span>待确认</span><strong id="mailReviewMetric">0</strong></div>
     </div>
     <div class="mail-filters">
-      <select id="mailStatusFilter"><option value="__default__">默认（隐藏已忽略）</option><option value="">全部状态</option><option>已写入</option><option>待确认</option><option>已忽略</option><option>失败</option></select>
+      <select id="mailStatusFilter"><option value="__default__">默认（隐藏已忽略）</option><option value="">全部状态</option><option>已写入</option><option>已完成</option><option>待确认</option><option>已忽略</option><option>失败</option></select>
       <select id="mailCategoryFilter"><option value="">全部分类</option><option>在线测评</option><option>ai面试</option><option>面试邀约</option></select>
+      <select id="mailSort"><option value="received_desc">接收时间：最新优先</option><option value="received_asc">接收时间：最早优先</option><option value="deadline_asc">DDL：最早优先</option><option value="deadline_desc">DDL：最晚优先</option></select>
     </div>
     <div id="mailHistoryTable"><div class="empty">同步后会显示读取过的邮件及处理结果</div></div>
   </div>
@@ -121,7 +122,7 @@
     <div id="progressChannelList" class="progress-channel-list">
       <div class="empty">点击“立即巡检”后显示招聘网站登录态状态。</div>
     </div>
-    <p class="muted progress-login-note">点击“Chrome 登录”后在当前浏览器完成密码自动填充、验证码或扫码，再点击“保存会话”并使用刷新按钮验证。</p>
+    <p class="muted progress-login-note">两步接入：先点“① 登录”在当前浏览器完成密码自动填充、验证码或扫码，登录成功后点“② 连接并验证”，插件会自动保存登录态、验证可用并回写飞书。</p>
   </div>
 </section>
 <section id="profile" class="section">

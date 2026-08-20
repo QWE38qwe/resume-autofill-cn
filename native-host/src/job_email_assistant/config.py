@@ -42,6 +42,8 @@ class Settings:
     feishu_table_id: str
     feishu_company_field: str
     feishu_note_field: str
+    feishu_position_field: str
+    feishu_progress_field: str
     feishu_assessment_link_field: str
     feishu_ddl_field: str
     feishu_parent_field: str
@@ -88,6 +90,8 @@ class Settings:
             feishu_table_id=_required("FEISHU_TABLE_ID"),
             feishu_company_field=os.getenv("FEISHU_COMPANY_FIELD", "公司"),
             feishu_note_field=os.getenv("FEISHU_NOTE_FIELD", "note"),
+            feishu_position_field=os.getenv("FEISHU_POSITION_FIELD", "岗位"),
+            feishu_progress_field=os.getenv("FEISHU_PROGRESS_FIELD", "进展"),
             feishu_assessment_link_field=os.getenv(
                 "FEISHU_ASSESSMENT_LINK_FIELD", "测评链接"
             ),
@@ -164,6 +168,8 @@ class Settings:
             feishu_table_id=required(feishu, "tableId", "飞书 Table ID"),
             feishu_company_field=str(feishu.get("companyField") or "公司"),
             feishu_note_field=str(feishu.get("noteField") or "note"),
+            feishu_position_field=str(feishu.get("positionField") or "岗位"),
+            feishu_progress_field=str(feishu.get("progressField") or "进展"),
             feishu_assessment_link_field=str(
                 feishu.get("assessmentLinkField") or "测评链接"
             ),

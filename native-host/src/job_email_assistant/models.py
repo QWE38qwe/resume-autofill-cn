@@ -18,6 +18,7 @@ class ParsedEmail:
 class Extraction:
     is_recruitment: bool = False
     company: str | None = None
+    position: str | None = None
     stage: str | None = None
     deadline: datetime | None = None
     assessment_url: str | None = None
@@ -28,6 +29,7 @@ class Extraction:
     def merge_missing(self, other: "Extraction") -> "Extraction":
         for name in (
             "company",
+            "position",
             "stage",
             "deadline",
             "assessment_url",

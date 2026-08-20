@@ -23,7 +23,12 @@ mkdir -p "$INSTALL_ROOT"
 cp "$ROOT/pyproject.toml" "$ROOT/uv.lock" "$ROOT/run-host.sh" "$INSTALL_ROOT/"
 mkdir -p "$INSTALL_ROOT/tracker/state/auth"
 if [[ -d "$TRACKER_AUTH_SOURCE" ]]; then
-  /usr/bin/ditto "$TRACKER_AUTH_SOURCE" "$INSTALL_ROOT/tracker/state/auth"
+  for source_state in "$TRACKER_AUTH_SOURCE"/*.state.enc(N); do
+    target_state="$INSTALL_ROOT/tracker/state/auth/${source_state:t}"
+    if [[ ! -f "$target_state" ]]; then
+      cp "$source_state" "$target_state"
+    fi
+  done
 fi
 if [[ -f "$ROOT/.env" ]]; then
   cp "$ROOT/.env" "$INSTALL_ROOT/.env"

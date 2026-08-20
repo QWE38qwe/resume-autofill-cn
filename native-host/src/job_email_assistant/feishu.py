@@ -31,6 +31,9 @@ def normalize_company(value: str) -> str:
         "pdd": "拼多多",
         "pdd拼多多": "拼多多",
         "拼多多集团pdd": "拼多多",
+        "小鹏": "小鹏汽车",
+        "小鹏集团": "小鹏汽车",
+        "xpeng": "小鹏汽车",
     }
     return aliases.get(value, value)
 
@@ -129,6 +132,8 @@ class FeishuBaseClient:
         required = {
             self.settings.feishu_company_field,
             self.settings.feishu_note_field,
+            self.settings.feishu_position_field,
+            self.settings.feishu_progress_field,
             self.settings.feishu_assessment_link_field,
             self.settings.feishu_ddl_field,
             self.settings.feishu_parent_field,
@@ -137,6 +142,8 @@ class FeishuBaseClient:
             self.settings.feishu_cookie_status_field,
             self.settings.feishu_cookie_checked_at_field,
             self.settings.feishu_monitor_enabled_field,
+            "待办状态",
+            "完成时间",
         }
         missing = required - actual
         if missing:
@@ -174,6 +181,24 @@ class FeishuBaseClient:
                 matches.append(record)
         return matches
 
+    def find_child_records(
+        self,
+        company: str,
+        subject: str,
+        records: list[BaseRecord] | None = None,
+    ) -> list[BaseRecord]:
+        target_company = normalize_company(company)
+        return [
+            record
+            for record in (records if records is not None else self.list_records())
+            if has_link_value(record.fields.get(self.settings.feishu_parent_field))
+            and normalize_company(
+                str(record.fields.get(self.settings.feishu_company_field) or "")
+            )
+            == target_company
+            and str(record.fields.get(self.settings.feishu_subject_field) or "") == subject
+        ]
+
     def create_child_record(
         self,
         parent: BaseRecord,
@@ -183,6 +208,8 @@ class FeishuBaseClient:
         note: str,
         assessment_url: str | None,
         deadline: str | None,
+        position: str | None = None,
+        todo_status: str = "待办",
     ) -> str:
         fields: dict[str, Any] = {
             self.settings.feishu_company_field: company,
@@ -190,7 +217,10 @@ class FeishuBaseClient:
             self.settings.feishu_parent_field: [parent.record_id],
             self.settings.feishu_received_at_field: received_at,
             self.settings.feishu_subject_field: subject,
+            "待办状态": todo_status,
         }
+        if position:
+            fields[self.settings.feishu_position_field] = position
         if assessment_url:
             fields[self.settings.feishu_assessment_link_field] = assessment_url
         if deadline:
@@ -205,8 +235,22 @@ class FeishuBaseClient:
     def update_record_fields(
         self, record: BaseRecord, fields: dict[str, Any]
     ) -> None:
+        self.update_record_fields_by_id(record.record_id, fields)
+
+    def update_record_fields_by_id(
+        self, record_id: str, fields: dict[str, Any]
+    ) -> None:
         self._request(
             "PUT",
-            f"{self._table_path}/records/{record.record_id}",
+            f"{self._table_path}/records/{record_id}",
             json={"fields": fields},
+        )
+
+    def mark_parent_progress(self, parent: BaseRecord, progress: str) -> None:
+        """把公司主记录的“进展”单选字段置为指定值（如“已挂”）。"""
+        current = str(parent.fields.get(self.settings.feishu_progress_field) or "")
+        if current == progress:
+            return
+        self.update_record_fields_by_id(
+            parent.record_id, {self.settings.feishu_progress_field: progress}
         )

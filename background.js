@@ -404,6 +404,7 @@ async function syncMail({ source = "manual" } = {}) {
 }
 
 async function monitorProgress(channelId = "") {
+  if (channelId === "baidu") return monitorBaiduInChrome();
   const { mailSettings = {}, settings = {}, progressMonitorStatus = {} } =
     await chrome.storage.local.get(["mailSettings", "settings", "progressMonitorStatus"]);
   const startedAt = new Date().toISOString();
@@ -454,6 +455,46 @@ async function monitorProgress(channelId = "") {
   }
 }
 
+async function monitorBaiduInChrome() {
+  const { progressLoginTabs = {}, mailSettings = {}, settings = {}, progressMonitorStatus = {} } =
+    await chrome.storage.local.get(["progressLoginTabs", "mailSettings", "settings", "progressMonitorStatus"]);
+  const tabId = progressLoginTabs.baidu;
+  if (!tabId) throw new Error("请先点击百度的“Chrome 登录”，在打开标签页完成登录后再刷新");
+  const [result] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => ({ url: location.href, text: document.body?.innerText?.slice(0, 3000) || "" })
+  });
+  const text = result?.result?.text || "";
+  const status = /登录|验证码|手机号登录/.test(text)
+    ? "已过期"
+    : /投递|应聘|申请|简历/.test(text) ? "生效中" : "读取失败";
+  const detail = status === "生效中"
+    ? "当前 Chrome 投递页可读取"
+    : status === "已过期" ? "当前 Chrome 页面要求登录" : "当前 Chrome 页面未识别投递信息";
+  const response = await sendNativeMessage({
+    ...mailPayload(mailSettings, settings),
+    action: "recordVisibleProgress",
+    channelId: "baidu",
+    status,
+    detail
+  });
+  if (!response.ok) throw new Error(response.error || "百度可见巡检失败");
+  const channels = [
+    ...(progressMonitorStatus.channels || []).filter(channel => channel.channel_id !== "baidu"),
+    ...(response.channels || [])
+  ];
+  const next = {
+    state: "success",
+    finishedAt: new Date().toISOString(),
+    startedAt: new Date().toISOString(),
+    updated: response.updated || 0,
+    channels,
+    runningChannelId: ""
+  };
+  await chrome.storage.local.set({ progressMonitorStatus: next });
+  return { ok: true, ...next };
+}
+
 async function startProgressLogin(channelId) {
   const { mailSettings = {}, settings = {} } =
     await chrome.storage.local.get(["mailSettings", "settings"]);
@@ -473,9 +514,9 @@ const progressChannelUrls = {
   shokz: "https://campus.shokz.com.cn/#/candidateHome/applications",
   nio_feishu: "https://nio.jobs.feishu.cn/campus/position/application",
   jd: "https://campus.jd.com/#/myDeliver?type=present",
-  pdd: "https://careers.pddglobalhr.com/campus/positions",
-  oppo: "https://careers.oppo.com/university/position",
-  iflytek: "https://campus.iflytek.com/#/candidateHome/application"
+  pdd: "https://careers.pddglobalhr.com/campus/personal-center",
+  oppo: "https://careers.oppo.com/university/oppo/center/history",
+  iflytek: "https://iflytek.zhiye.com/personal/deliveryRecord"
 };
 
 async function openChromeProgressLogin(channelId) {
@@ -509,6 +550,40 @@ async function saveChromeProgressSession(channelId) {
   });
   if (!response.ok) throw new Error(response.error || "保存登录会话失败");
   return response;
+}
+
+// 一步式向导：保存会话 → 立即验证 → 回写飞书，合并为一次调用，避免用户在
+// “保存会话 / 刷新验证”之间来回点击与串联 alert。
+async function saveAndVerifyProgressSession(channelId) {
+  const saved = await saveChromeProgressSession(channelId);
+  try {
+    const verified = await monitorProgress(channelId);
+    const channel = (verified.channels || []).find(item => item.channel_id === channelId);
+    return {
+      ok: true,
+      saved: true,
+      verified: true,
+      name: saved.name,
+      savedCookies: saved.cookies || 0,
+      updated: verified.updated || 0,
+      status: channel?.status || "",
+      detail: channel?.detail || "",
+      ...verified
+    };
+  } catch (error) {
+    // 会话已加密保存成功；验证阶段若因“未开启巡检”失败，柔性引导用户去飞书打开开关，
+    // 而不是把整个流程判为失败让用户误以为登录态没存上。
+    const message = error?.message || "验证失败";
+    return {
+      ok: true,
+      saved: true,
+      verified: false,
+      name: saved.name,
+      savedCookies: saved.cookies || 0,
+      needsMonitorToggle: message.includes("是否巡检"),
+      verifyError: message
+    };
+  }
 }
 
 chrome.runtime.onStartup.addListener(async () => {
@@ -558,6 +633,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(error => sendResponse({ ok: false, error: error.message }));
     return true;
   }
+  if (message.type === "MAIL_MANUAL_ACTION") {
+    chrome.storage.local.get(["mailSettings", "settings"]).then(({ mailSettings = {}, settings = {} }) =>
+      sendNativeMessage({
+        ...mailPayload(mailSettings, settings),
+        action: "manualMailAction",
+        messageId: message.messageId,
+        mailAction: message.mailAction,
+        mailSnapshot: message.mailSnapshot
+      })
+    ).then(sendResponse).catch(error => sendResponse({
+      ok: false,
+      error: error.message || "邮件操作失败"
+    }));
+    return true;
+  }
   if (message.type === "MAIL_IMPORT_LOCAL_CONFIG") {
     sendNativeMessage({ action: "localConfig" })
       .then(sendResponse)
@@ -589,6 +679,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     saveChromeProgressSession(message.channelId).then(sendResponse).catch(error => sendResponse({
       ok: false,
       error: error.message || "保存登录会话失败"
+    }));
+    return true;
+  }
+  if (message.type === "PROGRESS_SAVE_AND_VERIFY") {
+    saveAndVerifyProgressSession(message.channelId).then(sendResponse).catch(error => sendResponse({
+      ok: false,
+      error: error.message || "保存并验证登录态失败"
     }));
     return true;
   }

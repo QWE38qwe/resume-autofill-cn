@@ -912,7 +912,7 @@ async function choosePhoenixMonth(element, value) {
     }
   }
   const selectedValue = controlCurrentValue(element);
-  return Boolean(selectedValue && !/请选择|请输入|选择/.test(selectedValue));
+  return Boolean(selectedValue && !isPlaceholderValue(selectedValue));
 }
 
 async function chooseAntDate(element, value) {
@@ -1265,25 +1265,49 @@ async function fillDateLikeControl(element, value) {
   return true;
 }
 
+// 判断某个“当前值”是否只是占位提示（视为空白，可填）。
+// 关键：必须以占位词开头或整值等于占位词，避免把“我选择了计算机”这类含“选择”的真实内容误判为空而覆盖。
+function isPlaceholderValue(text) {
+  const value = String(text ?? "").trim();
+  if (!value) return true;
+  if (/^(请选择|请输入|请填写|请选|请填)/.test(value)) return true;
+  if (/^(选择|请选择|请输入|请填写|输入)$/.test(value)) return true;
+  if (/^[-—–·/\\]+$/.test(value)) return true;
+  return false;
+}
+
 function controlCurrentValue(element) {
   if (element instanceof HTMLSelectElement) {
     return element.selectedOptions?.[0]?.textContent?.trim() || element.value || "";
   }
   const wrapper = selectWrapperFor(element);
-  const display = wrapper?.querySelector([
-    ".phoenix-select-selection-selected-value",
-    ".phoenix-select-selection__rendered",
-    ".phoenix-select-selection__choice__content",
-    ".ant-select-selection-selected-value",
-    "[class*='Input-display-value']",
-    ".ant-select-selection-item",
-    ".el-select__selected-item",
-    ".ivu-select-selected-value",
-    "[class*='selected-value']",
-    "[class*='SelectedValue']"
-  ].join(","));
-  const displayValue = String(display?.innerText || display?.textContent || "").trim();
-  if (displayValue || /sd-Select|phoenix-select|ant-select/.test(String(wrapper?.className || ""))) return displayValue;
+  if (wrapper) {
+    const display = wrapper.querySelector([
+      ".phoenix-select-selection-selected-value",
+      ".phoenix-select-selection__rendered",
+      ".phoenix-select-selection__choice__content",
+      ".ant-select-selection-selected-value",
+      ".ant-select-selection-item",
+      "[class*='Input-display-value']",
+      ".el-select__selected-item",
+      ".el-select__tags .el-tag",
+      ".ivu-select-selected-value",
+      ".ivu-tag",
+      "[class*='selected-value']",
+      "[class*='SelectedValue']",
+      "[aria-selected='true']"
+    ].join(","));
+    const displayValue = String(
+      display?.innerText || display?.textContent || display?.getAttribute?.("title") || ""
+    ).trim();
+    if (displayValue) return displayValue;
+    // 明确处于占位态：存在占位元素说明确实未选择
+    if (wrapper.querySelector(".ant-select-selection-placeholder,.phoenix-select-selection-placeholder")) return "";
+    // 组件内部输入框可能承载已选文案（部分 combobox 实现）
+    const innerValue = String(wrapper.querySelector("input:not([type=hidden])")?.value || "").trim();
+    if (innerValue) return innerValue;
+    return String(element.value ?? "").trim();
+  }
   return String(element.value ?? element.textContent ?? "").trim();
 }
 
@@ -1327,7 +1351,7 @@ async function fillControl(element, value, overwrite = false) {
   }
 
   const current = controlCurrentValue(element);
-  if (!overwrite && String(current).trim() && !/请选择|请输入|选择/.test(String(current))) return "skipped";
+  if (!overwrite && String(current).trim() && !isPlaceholderValue(current)) return "skipped";
 
   if (element instanceof HTMLSelectElement) {
     return setNativeValue(element, value) ? "filled" : "failed";
@@ -1510,7 +1534,7 @@ function recordDescription(record) {
 
 function isBlankControl(element) {
   const current = controlCurrentValue(element);
-  return !current || /^(请选择|请输入|选择)$/.test(current);
+  return isPlaceholderValue(current);
 }
 
 function dateLayoutControls(block) {

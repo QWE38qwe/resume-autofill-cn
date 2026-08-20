@@ -773,7 +773,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .mail-metrics span, .mail-metrics strong { display: block; }
 .mail-metrics span { color: var(--caption); font-size: 10px; letter-spacing: .08em; }
 .mail-metrics strong { margin-top: 3px; font: 700 21px/1.1 "Avenir Next", sans-serif; }
-.mail-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.mail-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
 .mail-filters select { height: 34px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink-soft); }
 
 .mail-table-wrap { max-height: calc(100vh - 310px); overflow: auto; border: 1px solid var(--line); border-radius: 12px; }
@@ -784,6 +784,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .mail-table th:nth-child(3) { width: 80px; }
 .mail-table th:nth-child(4) { width: 116px; }
 .mail-table th:nth-child(5) { width: 94px; }
+.mail-table th:nth-child(6) { width: 102px; }
+.mail-action { width: 100%; min-height: 28px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink-soft); background: #fff; font-size: 11px; }
 .mail-table tr:hover td { background: #fbfcf8; }
 .mail-subject { overflow: hidden; color: var(--ink); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .mail-table small { display: block; margin-top: 3px; overflow: hidden; color: var(--caption); text-overflow: ellipsis; white-space: nowrap; }
@@ -829,6 +831,32 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .icon-button:hover { background: #e8f4ee; }
 .progress-login { margin-top: 10px; padding: 5px 9px; font-size: 11px; }
 .progress-login-note { margin: 14px 0 0; font-size: 11px; }
+.progress-save-verify { padding: 5px 12px; font-size: 12px; }
+
+/* 轻量 toast：右下角浮层，替代串联 alert */
+.toast-host {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 60;
+  max-width: 360px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 254, 250, .98);
+  box-shadow: 0 14px 34px rgba(18, 44, 41, .18);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  transition: opacity .22s ease, transform .22s ease;
+}
+.toast-host.show { opacity: 1; transform: translateY(0); }
+.toast-host.success { border-color: var(--success); border-left: 4px solid var(--success); }
+.toast-host.error { border-color: var(--danger); border-left: 4px solid var(--danger); }
+.toast-host.info { border-left: 4px solid var(--accent); }
 .compact-toggle { display: inline-flex; align-items: center; gap: 7px; color: #d9e9e6; font-size: 12px; white-space: nowrap; }
 .compact-toggle input { accent-color: #75cbb0; width: 16px; height: 16px; }
 .mail-hero-actions select { min-height: 36px; border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 0 9px; color: #fff; background: rgba(0,0,0,.14); }

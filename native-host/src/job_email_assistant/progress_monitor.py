@@ -8,7 +8,7 @@ import re
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Any
 
@@ -40,8 +40,9 @@ class ChannelStatus:
     company: str
     status: str
     detail: str
+    job_progress: list[dict[str, str]] = field(default_factory=list)
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -139,27 +140,43 @@ CHANNELS = (
         "pdd",
         "拼多多",
         "拼多多",
-        "https://careers.pddglobalhr.com/campus/positions",
+        "https://careers.pddglobalhr.com/campus/personal-center",
         ("/login", "passport", "auth"),
-        ('[class*="application"] [class*="item"]', '[class*="delivery"] [class*="card"]'),
+        (
+            "text=应聘状态",
+            "text=当前状态",
+            "text=当前应聘职位",
+            '[class*="application"] [class*="item"]',
+            '[class*="delivery"] [class*="card"]',
+        ),
         ("text=暂无投递记录", "text=暂无应聘记录", '[class*="empty"]'),
     ),
     Channel(
         "oppo",
         "OPPO",
         "OPPO",
-        "https://careers.oppo.com/university/position",
+        "https://careers.oppo.com/university/oppo/center/history",
         ("/login", "passport", "auth"),
-        ('[class*="application"] [class*="item"]', '[class*="delivery"] [class*="card"]'),
+        (
+            "text=应聘记录",
+            "text=投递记录",
+            '[class*="application"] [class*="item"]',
+            '[class*="delivery"] [class*="card"]',
+        ),
         ("text=暂无投递记录", "text=暂无应聘记录", '[class*="empty"]'),
     ),
     Channel(
         "iflytek",
         "科大讯飞",
         "科大讯飞",
-        "https://campus.iflytek.com/#/candidateHome/application",
+        "https://iflytek.zhiye.com/personal/deliveryRecord",
         ("/login", "passport", "auth"),
-        ('[class*="application"] [class*="item"]', '[class*="delivery"] [class*="card"]'),
+        (
+            "text=投递记录",
+            "text=应聘记录",
+            '[class*="application"] [class*="item"]',
+            '[class*="delivery"] [class*="card"]',
+        ),
         ("text=暂无投递记录", "text=暂无应聘记录", '[class*="empty"]'),
     ),
 )
@@ -181,6 +198,17 @@ class AuthStore:
         account = getpass.getuser()
         if platform.system() != "Darwin":
             raise RuntimeError("进展巡检当前仅支持 macOS Keychain 登录态")
+        existing = self._read_keychain_key(account)
+        if existing:
+            return existing
+        # 首次使用：本项目自行生成密钥并写入 Keychain，不再依赖外部 autotrack 项目。
+        generated = Fernet.generate_key()
+        if not self._write_keychain_key(account, generated):
+            raise RuntimeError("无法在 macOS 钥匙串中创建登录态密钥，请检查钥匙串访问权限后重试")
+        return generated
+
+    @staticmethod
+    def _read_keychain_key(account: str) -> bytes | None:
         result = subprocess.run(
             [
                 "security",
@@ -195,8 +223,29 @@ class AuthStore:
             text=True,
         )
         if result.returncode != 0:
-            raise RuntimeError("未找到本机登录态密钥，请在此设备重新登录招聘网站")
-        return result.stdout.strip().encode("ascii")
+            return None
+        value = result.stdout.strip()
+        return value.encode("ascii") if value else None
+
+    @staticmethod
+    def _write_keychain_key(account: str, key: bytes) -> bool:
+        # -U 允许在已存在同名条目时更新，避免残留空条目导致失败。
+        result = subprocess.run(
+            [
+                "security",
+                "add-generic-password",
+                "-s",
+                "autotrack.playwright",
+                "-a",
+                account,
+                "-w",
+                key.decode("ascii"),
+                "-U",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
 
     def load(self, channel_id: str) -> dict[str, Any]:
         try:
@@ -219,6 +268,84 @@ def _matches_any(page: Any, selectors: tuple[str, ...]) -> bool:
         except PlaywrightTimeout:
             continue
     return False
+
+
+def _normalize_job_name(value: str) -> str:
+    value = re.sub(r"^\d+届(?:提前批|校招|春招)?[-\s]*", "", value)
+    return re.sub(r"[\s\-—_（）()]+", "", value).casefold()
+
+
+def _field_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return "".join(
+            str(item.get("text") or "")
+            for item in value
+            if isinstance(item, dict)
+        )
+    return ""
+
+
+def _shokz_job_progress(page: Any) -> list[dict[str, str]]:
+    text = page.locator("body").inner_text()
+    jobs: list[dict[str, str]] = []
+    pattern = re.compile(
+        r"第\s*(?P<priority>\d+)\s*志愿\s*\n"
+        r"(?P<job>[^\n]+).*?"
+        r"状态:\s*\n(?P<status>[^\n]+)\s*\n项目:",
+        re.DOTALL,
+    )
+    for match in pattern.finditer(text):
+        raw_status = match.group("status").strip()
+        jobs.append(
+            {
+                "priority": match.group("priority"),
+                "job": match.group("job").strip(),
+                "status": "已挂" if raw_status == "暂不匹配" else raw_status,
+                "source_status": raw_status,
+            }
+        )
+    return jobs
+
+
+def _sync_shokz_job_progress(
+    feishu: FeishuBaseClient, records: list[Any], job_progress: list[dict[str, str]]
+) -> int:
+    children = [
+        record
+        for record in records
+        if has_link_value(record.fields.get(feishu.settings.feishu_parent_field))
+        and normalize_company(
+            str(record.fields.get(feishu.settings.feishu_company_field) or "")
+        )
+        == normalize_company("韶音科技")
+    ]
+    updated = 0
+    for job in job_progress:
+        source_name = _normalize_job_name(job["job"])
+        matches = [
+            record
+            for record in children
+            if _normalize_job_name(str(record.fields.get("岗位") or "")) in source_name
+            or source_name in _normalize_job_name(str(record.fields.get("岗位") or ""))
+        ]
+        if len(matches) != 1:
+            continue
+        record = matches[0]
+        next_fields = {
+            "进展": job["status"],
+            "任务描述": f"韶音科技 - {record.fields.get('岗位') or job['job']} - {job['status']}",
+        }
+        if (
+            record.fields.get("进展") == next_fields["进展"]
+            and _field_text(record.fields.get("任务描述"))
+            == next_fields["任务描述"]
+        ):
+            continue
+        feishu.update_record_fields(record, next_fields)
+        updated += 1
+    return updated
 
 
 def check_channel(channel: Channel, auth_store: AuthStore) -> ChannelStatus:
@@ -253,7 +380,12 @@ def check_channel(channel: Channel, auth_store: AuthStore) -> ChannelStatus:
                 page, channel.empty_selectors
             ):
                 return ChannelStatus(
-                    channel.channel_id, channel.name, channel.company, "生效中", "投递页可读取"
+                    channel.channel_id,
+                    channel.name,
+                    channel.company,
+                    "生效中",
+                    "投递页可读取",
+                    _shokz_job_progress(page) if channel.channel_id == "shokz" else [],
                 )
             return ChannelStatus(
                 channel.channel_id,
@@ -326,7 +458,8 @@ def save_chrome_cookies(channel_id: str, cookies: list[dict[str, Any]]) -> dict[
                 "strict": "Strict",
             }.get(same_site, "Lax"),
         })
-    AuthStore(TRACKER_ROOT / "state" / "auth").save(
+    auth_store = AuthStore(TRACKER_ROOT / "state" / "auth")
+    auth_store.save(
         channel.channel_id, {"cookies": normalized, "origins": []}
     )
     return {"ok": True, "channelId": channel.channel_id, "name": channel.name, "cookies": len(normalized)}
@@ -383,6 +516,10 @@ def run_monitor(feishu: FeishuBaseClient, channel_id: str | None = None) -> dict
                 },
             )
             updated += 1
+        if channel_status.channel_id == "shokz":
+            updated += _sync_shokz_job_progress(
+                feishu, records, channel_status.job_progress
+            )
     channel_data = []
     for status in statuses:
         channel = get_channel(status.channel_id)
@@ -394,4 +531,31 @@ def run_monitor(feishu: FeishuBaseClient, channel_id: str | None = None) -> dict
         "ok": True,
         "updated": updated,
         "channels": channel_data,
+    }
+
+
+def record_visible_status(
+    feishu: FeishuBaseClient, channel_id: str, status: str, detail: str
+) -> dict[str, Any]:
+    channel = get_channel(channel_id)
+    records = feishu.list_records()
+    if channel not in enabled_channels(feishu, records):
+        raise ValueError("请先在飞书该公司主记录中将“是否巡检”设为“是”")
+    checked_at = int(time.time() * 1000)
+    parents = feishu.find_company_parents(channel.company, records)
+    for parent in parents:
+        feishu.update_record_fields(
+            parent,
+            {
+                feishu.settings.feishu_cookie_status_field: status,
+                feishu.settings.feishu_cookie_checked_at_field: checked_at,
+            },
+        )
+    return {
+        "ok": True,
+        "updated": len(parents),
+        "channels": [{
+            **ChannelStatus(channel.channel_id, channel.name, channel.company, status, detail).to_dict(),
+            "applicationUrl": channel.applications_url,
+        }],
     }

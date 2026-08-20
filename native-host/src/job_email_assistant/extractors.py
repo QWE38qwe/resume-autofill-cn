@@ -13,6 +13,38 @@ from .config import Settings
 from .models import Extraction, ParsedEmail
 
 CATEGORIES = {"在线测评", "ai面试", "面试邀约"}
+# 流程结束/婉拒不属于“需要候选人行动”的三类邀约，单独成一类，用于把“挂了”回写飞书。
+REJECTION_STAGE = "流程结束"
+# 强信号：措辞本身即为婉拒/结束，出现即判定为结束。
+STRONG_REJECTION_CUES = (
+    "很遗憾",
+    "遗憾地通知",
+    "遗憾通知",
+    "遗憾的通知",
+    "未能进入下一",
+    "未进入下一",
+    "落选",
+    "另寻高就",
+    "前程似锦",
+    "求职顺利",
+    "岗位已关闭",
+    "职位已关闭",
+    "未能入选",
+    "未入选",
+    "不予录用",
+    "暂不考虑",
+)
+# 弱信号：需在“没有明确邀约动作”时才判为结束，避免把“未通过初筛将取消资格”这类提醒误判。
+WEAK_REJECTION_CUES = (
+    "未通过",
+    "未能通过",
+    "不合适",
+    "未匹配",
+    "暂不匹配",
+    "暂不适合",
+    "暂不推进",
+    "不再推进",
+)
 IGNORE_SUBJECT_CUES = (
     "投递成功",
     "投递确认",
@@ -156,6 +188,55 @@ def classify_explicit_invitation(message: ParsedEmail) -> tuple[str | None, str]
     return None, "未明确要求参加或完成三类邀约"
 
 
+def classify_rejection(message: ParsedEmail) -> tuple[bool, str]:
+    """判断是否为流程结束/婉拒邮件。返回 (是否结束, 命中依据)。"""
+    combined = f"{message.subject}\n{message.text}"
+    for cue in STRONG_REJECTION_CUES:
+        if cue in combined:
+            return True, f"命中结束信号：{cue}"
+    # 弱信号仅在没有明确邀约动作时才判为结束，避免误伤“未完成测评将失效”这类提醒。
+    stage, _ = classify_explicit_invitation(message)
+    if stage:
+        return False, ""
+    for cue in WEAK_REJECTION_CUES:
+        if cue in combined:
+            return True, f"命中结束信号：{cue}"
+    return False, ""
+
+
+POSITION_PATTERNS = (
+    re.compile(r"应聘(?:的)?(?:岗位|职位)[：:是为]?\s*([^\n，。、；;（）()【】\[\]]{2,30})"),
+    re.compile(r"(?:您投递的|你投递的|所投递的|投递(?:的)?)(?:岗位|职位)[：:是为]?\s*([^\n，。、；;（）()【】\[\]]{2,30})"),
+    re.compile(r"(?:岗位|职位)(?:名称)?[：:]\s*([^\n，。、；;（）()【】\[\]]{2,30})"),
+    re.compile(r"[（(【\[]([^）)】\]]{2,30}?(?:工程师|经理|专员|实习生|设计师|研究员|助理|顾问|开发|运营|产品|算法|测试|架构师|分析师|策划))[）)】\]]"),
+    re.compile(r"([\u4e00-\u9fffA-Za-z0-9/·]{2,30}?(?:工程师|经理|专员|实习生|设计师|研究员|助理|顾问|架构师|分析师))(?:岗位|职位|一职|一岗)?"),
+)
+
+
+def _clean_position(value: str | None) -> str | None:
+    if not value:
+        return None
+    value = re.sub(r"\s+", " ", value).strip(" -_：:、,，。")
+    value = re.sub(r"^(?:的)?", "", value)
+    if len(value) < 2 or len(value) > 30:
+        return None
+    if value.lower() in GENERIC_COMPANY_LABELS:
+        return None
+    return value
+
+
+def _position(subject: str, text: str) -> str | None:
+    combined = f"{subject}\n{text}"
+    for pattern in POSITION_PATTERNS:
+        match = pattern.search(combined)
+        if match:
+            cleaned = _clean_position(match.group(1))
+            if cleaned:
+                return cleaned
+    return None
+
+
+
 def _parse_deadline(text: str, base: datetime) -> datetime | None:
     duration = DURATION_RE.search(text)
     if duration:
@@ -196,6 +277,17 @@ def _parse_deadline(text: str, base: datetime) -> datetime | None:
 def extract_with_rules(message: ParsedEmail) -> Extraction:
     stage, reason = classify_explicit_invitation(message)
     if not stage:
+        is_rejection, rejection_reason = classify_rejection(message)
+        if is_rejection:
+            return Extraction(
+                is_recruitment=True,
+                company=_company(message.subject, message.text, message.sender),
+                position=_position(message.subject, message.text),
+                stage=REJECTION_STAGE,
+                confidence=88,
+                needs_review=False,
+                evidence=[rejection_reason],
+            )
         return Extraction(is_recruitment=False, confidence=95, evidence=[reason])
 
     combined = f"{message.subject}\n{message.text}"
@@ -211,6 +303,7 @@ def extract_with_rules(message: ParsedEmail) -> Extraction:
     return Extraction(
         is_recruitment=True,
         company=_company(message.subject, message.text, message.sender),
+        position=_position(message.subject, message.text),
         stage=stage,
         deadline=_parse_deadline(combined, message.received_at),
         assessment_url=(preferred or urls or [None])[0],
@@ -318,6 +411,7 @@ class OpenAICompatibleExtractor:
         return Extraction(
             is_recruitment=bool(data.get("explicit_action")) and category in CATEGORIES,
             company=_clean_company(data.get("company")),
+            position=_position(message.subject, message.text),
             stage=category,
             deadline=deadline,
             assessment_url=data.get("assessment_url") or None,
