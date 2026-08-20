@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import getpass
 import json
 import os
-import platform
 import re
 import subprocess
 import sys
@@ -19,6 +17,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
 
 from .feishu import BaseRecord, FeishuBaseClient, has_link_value, normalize_company
+from .platform_key import load_or_create_key
 
 
 TRACKER_ROOT = Path(__file__).resolve().parents[2] / "tracker"
@@ -204,57 +203,7 @@ class AuthStore:
         return self._path(channel_id).exists()
 
     def _key(self) -> bytes:
-        account = getpass.getuser()
-        if platform.system() != "Darwin":
-            raise RuntimeError("进展巡检当前仅支持 macOS Keychain 登录态")
-        existing = self._read_keychain_key(account)
-        if existing:
-            return existing
-        # 首次使用：本项目自行生成密钥并写入 Keychain，不再依赖外部 autotrack 项目。
-        generated = Fernet.generate_key()
-        if not self._write_keychain_key(account, generated):
-            raise RuntimeError("无法在 macOS 钥匙串中创建登录态密钥，请检查钥匙串访问权限后重试")
-        return generated
-
-    @staticmethod
-    def _read_keychain_key(account: str) -> bytes | None:
-        result = subprocess.run(
-            [
-                "security",
-                "find-generic-password",
-                "-s",
-                "autotrack.playwright",
-                "-a",
-                account,
-                "-w",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            return None
-        value = result.stdout.strip()
-        return value.encode("ascii") if value else None
-
-    @staticmethod
-    def _write_keychain_key(account: str, key: bytes) -> bool:
-        # -U 允许在已存在同名条目时更新，避免残留空条目导致失败。
-        result = subprocess.run(
-            [
-                "security",
-                "add-generic-password",
-                "-s",
-                "autotrack.playwright",
-                "-a",
-                account,
-                "-w",
-                key.decode("ascii"),
-                "-U",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        return result.returncode == 0
+        return load_or_create_key(self.directory)
 
     def load(self, channel_id: str) -> dict[str, Any]:
         try:
@@ -707,11 +656,19 @@ def login_and_save(channel_id: str) -> None:
 
 def start_login(channel_id: str) -> dict[str, str]:
     channel = get_channel(channel_id)
+    process_options: dict[str, Any] = {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if os.name == "nt":
+        process_options["creationflags"] = (
+            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+        )
+    else:
+        process_options["start_new_session"] = True
     subprocess.Popen(
         [sys.executable, "-m", "job_email_assistant.progress_login", channel.channel_id],
-        start_new_session=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        **process_options,
     )
     return {"ok": True, "channelId": channel.channel_id, "name": channel.name}
 

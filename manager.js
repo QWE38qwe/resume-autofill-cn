@@ -1264,6 +1264,32 @@ function mailSettingsDefaults() {
   };
 }
 
+function detectedNativeHostPlatform() {
+  const value = String(navigator.userAgentData?.platform || navigator.platform || "");
+  return /win/i.test(value) ? "windows" : "macos";
+}
+
+function renderNativeHostPlatform(platform = db.nativeHostPlatform || detectedNativeHostPlatform()) {
+  const selected = platform === "windows" ? "windows" : "macos";
+  db.nativeHostPlatform = selected;
+  $$("[data-native-platform]").forEach(button => {
+    const active = button.dataset.nativePlatform === selected;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  if (selected === "windows") {
+    $("#mailInstallCommand").textContent =
+      `powershell -ExecutionPolicy Bypass -File .\\native-host\\install-windows.ps1 -ExtensionId ${chrome.runtime.id}`;
+    $("#nativePlatformHint").textContent =
+      "在源码根目录运行。Windows 11 x64：安装到 %LOCALAPPDATA%\\Jianfill\\MailHost，注册当前用户的 Chrome / Edge，登录态密钥由 DPAPI 保护。";
+  } else {
+    $("#mailInstallCommand").textContent =
+      `./native-host/install.sh ${chrome.runtime.id}`;
+    $("#nativePlatformHint").textContent =
+      "在源码根目录运行。macOS：安装到 ~/Library/Application Support/Jianfill Mail Host，注册 Chrome / Edge，登录态密钥保存在 Keychain。";
+  }
+}
+
 function renderMailSettings() {
   const settings = { ...mailSettingsDefaults(), ...(db.mailSettings || {}) };
   if (Number(settings.syncIntervalMinutes) === 120) {
@@ -1297,11 +1323,12 @@ function renderMailSettings() {
   $("#mailAiSummary").textContent = providers.length
     ? `共用 ${providers.length} 个启用模型 · 优先 ${providers[0].name || providers[0].model}`
     : "尚未启用 AI 模型版本，邮件同步前请先完成设置。";
-  $("#mailInstallCommand").textContent =
-    `./native-host/install.sh ${chrome.runtime.id}`;
+  renderNativeHostPlatform();
   const localStatus = $("#localConfigStatus");
   if (localStatus && !localStatus.dataset.touched) {
-    localStatus.textContent = "运行本地桥接安装脚本后，可从 native-host/.env 导入配置。";
+    localStatus.textContent = db.nativeHostPlatform === "windows"
+      ? "PowerShell 安装后，可通过 Native Host 导入本地 .env 配置。"
+      : "运行 zsh 安装脚本后，可从 native-host/.env 导入配置。";
   }
   updateBridgeState("idle", "检测本地桥接");
 }
@@ -1532,7 +1559,15 @@ $("#saveMailSettings").addEventListener("click", async () => {
 $("#testMailBridge").addEventListener("click", async () => {
   updateBridgeState("loading", "正在连接");
   const result = await chrome.runtime.sendMessage({ type: "MAIL_PING" });
-  updateBridgeState(result?.ok ? "success" : "error", result?.ok ? "本地桥接可用" : "本地桥接未安装");
+  const platformLabel = result?.platform === "Windows"
+    ? "Windows"
+    : result?.platform === "Darwin" ? "macOS" : result?.platform || "";
+  updateBridgeState(
+    result?.ok ? "success" : "error",
+    result?.ok
+      ? `${platformLabel || "本机"}桥接 v${result.version || "未知"}`
+      : "本地桥接未安装"
+  );
 });
 
 $("#syncMailNow").addEventListener("click", async () => {
@@ -1557,7 +1592,6 @@ $("#syncMailNow").addEventListener("click", async () => {
     button.textContent = "立即同步";
   }
 });
-
 $("#runProgressMonitor").addEventListener("click", async () => {
   const button = $("#runProgressMonitor");
   button.disabled = true;
@@ -1719,6 +1753,13 @@ $("#mailHistoryTable").addEventListener("change", async event => {
   } finally {
     select.disabled = false;
   }
+});
+$$("[data-native-platform]").forEach(button => {
+  button.addEventListener("click", async () => {
+    db.nativeHostPlatform = button.dataset.nativePlatform;
+    await chrome.storage.local.set({ nativeHostPlatform: db.nativeHostPlatform });
+    renderNativeHostPlatform(db.nativeHostPlatform);
+  });
 });
 $("#copyMailInstall").addEventListener("click", async () => {
   await navigator.clipboard.writeText($("#mailInstallCommand").textContent);

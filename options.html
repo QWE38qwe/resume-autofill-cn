@@ -271,11 +271,17 @@
     <div class="surface-head">
       <div><span class="section-kicker">一次性安装</span><h2>本地桥接</h2><p>扩展需要 Native Messaging 才能访问 IMAP。安装后日常使用无需终端。</p></div>
     </div>
+    <div class="native-platform-switch" role="tablist" aria-label="选择本地桥接系统">
+      <button type="button" data-native-platform="macos" role="tab">macOS</button>
+      <button type="button" data-native-platform="windows" role="tab">Windows</button>
+    </div>
+    <p class="native-platform-hint" id="nativePlatformHint"></p>
     <div class="install-command"><code id="mailInstallCommand"></code><button class="btn ghost small" id="copyMailInstall">复制</button></div>
     <div class="settings-actions">
       <span class="muted" id="localConfigStatus">运行安装脚本后，可从 native-host/.env 导入配置。</span>
       <button class="btn secondary" id="importLocalConfig">导入本地配置</button>
     </div>
+    <p class="muted native-install-doc"><a href="https://github.com/QWE38qwe/resume-autofill-cn/blob/main/docs/MAIL_SYNC_SETUP.md" target="_blank" rel="noopener">查看邮件同步与系统安装说明 ↗</a></p>
   </div>
 </section>
     </main>

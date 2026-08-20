@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "简填 - 网申自动填充",
-  "version": "0.17.3",
+  "version": "0.18.0",
   "description": "简历自动填充、邮件邀约识别与飞书待办同步",
   "homepage_url": "https://github.com/QWE38qwe/resume-autofill-cn",
   "permissions": ["storage", "activeTab", "scripting", "nativeMessaging", "alarms", "cookies"],

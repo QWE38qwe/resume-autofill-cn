@@ -32,6 +32,8 @@ for file in "${files[@]}"; do
   cp "$ROOT/$file" "$STAGE/$file"
 done
 cp -R "$ROOT/icons" "$ROOT/vendor" "$STAGE/"
+mkdir -p "$STAGE/scripts"
+cp "$ROOT/scripts/readme-demo.js" "$STAGE/scripts/"
 
 mkdir -p "$RELEASE_DIR"
 rm -f "$OUTPUT"

@@ -9,17 +9,12 @@
 - 本地网申记录
 - 用户自行配置的 AI 字段映射
 
-当前不能直接跨平台的是 Native Messaging 本地桥接：
-
-- 安装脚本使用 zsh 和 macOS 目录
-- 登录态加密密钥依赖 macOS Keychain
-- Native Messaging manifest 只写入 macOS Chrome / Edge 目录
-- 运行入口依赖 Unix shell
-
-因此 Windows 版本应拆成两个交付物：
+Native Messaging 本地桥接已提供 Windows 开发版适配：
 
 1. Chrome Web Store 扩展：提供全部纯浏览器能力。
-2. 可选 Windows 本地桥接安装包：提供 IMAP 邮件同步和招聘站后台巡检。
+2. PowerShell 开发安装脚本：安装同一 Python 包，提供 IMAP 邮件同步和招聘站巡检。
+
+当前仍缺少面向普通用户的签名 EXE 安装器和 Windows 真机 E2E 证据。
 
 ## 个人资料保存方式
 
@@ -67,7 +62,19 @@
 
 ## Windows Native Host
 
-### 推荐交付方式
+### 当前开发版
+
+`native-host/install-windows.ps1` 会：
+
+- 安装到 `%LOCALAPPDATA%\Jianfill\MailHost`。
+- 使用 uv 创建隔离环境和 `jianfill-mail-host.exe` 启动器。
+- 安装 Playwright Chromium。
+- 写入当前用户的 Chrome / Edge Native Messaging 注册表。
+- 使用当前 Windows 用户 DPAPI 保护 Fernet 登录态密钥。
+
+设置页可在 macOS / Windows 之间切换并复制对应命令。
+
+### 正式交付建议
 
 面向普通用户不应要求安装 Python 或 uv。推荐用 PyInstaller 生成单文件可执行程序，
 再用 Inno Setup 或 WiX 打包安装器。
@@ -94,12 +101,12 @@
 
 ### 密钥与登录态
 
-将当前 `AuthStore` 拆成平台后端：
+`AuthStore` 已拆成平台后端：
 
 - macOS：Keychain
-- Windows：Windows Credential Manager 或 DPAPI
+- Windows：DPAPI
 
-推荐 DPAPI 保护随机 Fernet key，密文状态继续存放在用户本地目录。不要把 macOS
+Windows 已使用 DPAPI 保护随机 Fernet key，密文状态继续存放在用户本地目录。不要把 macOS
 Keychain 密钥复制到 Windows，也不要把招聘站 Cookie 放入普通资料备份。
 
 ### 签名
@@ -117,11 +124,12 @@ Keychain 密钥复制到 Windows，也不要把招聘站 Cookie 放入普通资�
 
 ### P1：Windows 本地桥接
 
-- 抽象平台密钥存储
-- 使用 `%LOCALAPPDATA%` 作为运行目录
-- 增加 PowerShell 开发安装脚本
+- [x] 抽象平台密钥存储
+- [x] 使用 `%LOCALAPPDATA%` 作为运行目录
+- [x] 增加 PowerShell 开发安装脚本
+- [x] 注册 Chrome / Edge Native Messaging
+- [ ] Windows 11 x64 真机 Ping、邮件同步和巡检 E2E
 - 生成 PyInstaller 可执行程序和安装器
-- 验证 Chrome / Edge Native Messaging
 
 ### P2：发布工程
 
@@ -142,4 +150,3 @@ Keychain 密钥复制到 Windows，也不要把招聘站 Cookie 放入普通资�
 | 邮件同步 | IMAP 读取并写入测试 Base |
 | 登录态巡检 | 支持渠道完成一次真实页面巡检 |
 | 卸载 | 注册表清理，用户数据按选择保留或删除 |
-

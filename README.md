@@ -48,10 +48,18 @@
 3. 开启“开发者模式”。
 4. 点击“加载已解压的扩展程序”。
 5. 选择仓库根目录。
-6. 如需邮件同步和后台进展巡检，在 macOS 扩展卡片复制扩展 ID，并执行一次可选的本地桥接安装：
+6. 如需邮件同步和后台进展巡检，复制扩展 ID，并在源码根目录执行对应系统的本地桥接安装。
+
+macOS：
 
 ```bash
 ./native-host/install.sh <扩展ID>
+```
+
+Windows 11 x64 PowerShell：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\native-host\install-windows.ps1 -ExtensionId <扩展ID>
 ```
 
 新安装不会预置任何个人资料。请先在管理台录入资料并创建简历版本。
@@ -68,8 +76,9 @@ Base Token 和目标 Table ID。
 ## Windows 支持
 
 Chrome / Edge 中的资料管理、简历版本、字段识别和自动填表可以在 Windows 使用。
-当前 Native Messaging 本地桥接仍只提供 macOS 安装器，因此 Windows 暂不支持 IMAP
-邮件同步和后台招聘站巡检。Windows 安装器、密钥存储和跨设备加密备份的实施方案见
+Windows 11 x64 现可通过 PowerShell 安装开发版 Native Host，使用同一套邮件同步和
+招聘站巡检代码；招聘站登录态密钥由当前 Windows 用户的 DPAPI 保护。Windows 真机
+仍需完成最终 E2E 验收，且当前不是签名安装器。跨设备资料加密备份尚未实现，详见
 [Windows 支持与资料迁移方案](docs/WINDOWS_SUPPORT_PLAN.md)。
 
 ## 使用

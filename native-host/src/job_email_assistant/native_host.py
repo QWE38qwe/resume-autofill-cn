@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import platform
 import struct
 import sys
 from dataclasses import asdict
@@ -113,7 +114,17 @@ def local_config() -> dict[str, Any]:
 def handle(message: dict[str, Any]) -> dict[str, Any]:
     action = message.get("action")
     if action == "ping":
-        return {"ok": True, "version": __version__}
+        system = platform.system()
+        return {
+            "ok": True,
+            "version": __version__,
+            "platform": system,
+            "keyProtection": (
+                "macOS Keychain" if system == "Darwin"
+                else "Windows DPAPI" if system == "Windows"
+                else "unsupported"
+            ),
+        }
     if action == "localConfig":
         return local_config()
     if action == "retryReview":

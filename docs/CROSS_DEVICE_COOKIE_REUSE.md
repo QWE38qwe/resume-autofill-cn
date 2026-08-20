@@ -2,7 +2,7 @@
 
 ## 结论
 
-当前 MVP 不会把 Cookie、招聘网站登录态或 Keychain 密钥同步到
+当前版本不会把 Cookie、招聘网站登录态、Keychain 密钥或 DPAPI 密钥同步到
 `chrome.storage.sync`、Google 账号或 Git。
 
 每台设备都需要单独在招聘网站完成一次登录，然后由“简填”的本地巡检功能保存
@@ -11,48 +11,49 @@
 ## 为什么不能直接复制 Chrome Cookie
 
 - Chrome Cookie 通常受本机系统加密保护，直接复制 Cookie 数据库到另一台设备通常无法使用。
-- 当前登录态文件使用 macOS Keychain 中的密钥加密；复制加密文件但没有本机 Keychain 密钥也无法解密。
+- macOS 登录态文件依赖本机 Keychain；Windows 登录态文件依赖当前用户 DPAPI。
+  两者都不能通过复制密文文件在另一台设备解密。
 - 直接同步明文 Cookie 会使招聘网站会话在多个设备暴露，失效和排查都更困难。
 
 ## 新设备操作步骤
 
 1. 安装简填扩展，并在 `chrome://extensions` 重新加载。
-2. 运行一次本地桥接安装：
+2. 运行一次本地桥接安装。macOS：
 
    ```bash
-   cd "/Users/bytedance/Desktop/简填插件_V0.4.0"
    ./native-host/install.sh <扩展ID>
+   ```
+
+   Windows PowerShell：
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\native-host\install-windows.ps1 -ExtensionId <扩展ID>
    ```
 
 3. 在新设备浏览器中打开每个招聘网站并手动登录。
    验证码、扫码、滑块等必须由本人完成。
-4. 在新设备使用 `autotrack` 的本机登录命令，为每个渠道完成一次登录态保存：
-
-   ```bash
-   cd "/Users/bytedance/Documents/trae_projects/feishucli/autotrack"
-   .venv/bin/python main.py --login <channel_id>
-   ```
-
-   例如：`bytedance`、`xiaomi_feishu`、`shokz`。
-   登录态会被加密保存在：
+4. 在简填“投递进展”页点击“① 登录”，完成登录后点击“② 连接并验证”。
+   登录态会被加密保存在对应系统的 Native Host 运行目录：
 
    ```text
+   macOS:
    ~/Library/Application Support/Jianfill Mail Host/tracker/state/auth/
+
+   Windows:
+   %LOCALAPPDATA%\Jianfill\MailHost\tracker\state\auth\
    ```
 
-5. 或者直接在简填的“投递进展”页点击该渠道的“重新登录”。它会启动独立
-   Chromium 窗口；在 5 分钟内完成登录，窗口自动关闭后会保存加密登录态。
-6. 打开扩展的“投递进展”页，点击“立即巡检”。
-7. 查看飞书多维表格中的 `Cookie状态`：
+5. 打开扩展的“投递进展”页，点击“立即巡检”。
+6. 查看飞书多维表格中的 `Cookie状态`：
 
    - `生效中`：登录态和投递页均可读取。
    - `已过期`：招聘站要求重新登录。
    - `读取失败`：登录态存在，但页面结构、网络或站点策略导致无法读取；手动查看投递进展。
    - `未配置`：此设备尚未保存该渠道登录态。
 
-也可在扩展“投递进展”页使用 `Chrome 登录`：扩展会在当前 Chrome Profile 打开
+扩展会在当前 Chrome Profile 打开
 招聘网站，因此可以使用浏览器已保存的密码自动填充。完成登录后回到扩展点击
-`保存会话`，再点击该行刷新验证。密码本身不会被扩展读取。
+“② 连接并验证”。密码本身不会被扩展读取。
 
 ## 其他设备 AI 的操作边界
 
@@ -66,7 +67,7 @@
 不要让任何工具：
 
 - 输出、上传或提交 Cookie、Storage State、邮箱授权码、飞书密钥、API Key。
-- 复制 macOS Keychain 内容。
+- 复制 macOS Keychain 或 Windows DPAPI 密钥内容。
 - 绕过招聘网站验证码、扫码或滑块。
 
 ## 后续可选方案

@@ -124,7 +124,8 @@
       local: {
         get: async keys => selectStore(keys),
         set: async values => Object.assign(demoStore, values)
-      }
+      },
+      onChanged: { addListener: () => {} }
     },
     tabs: {
       query: async () => [{

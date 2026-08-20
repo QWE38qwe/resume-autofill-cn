@@ -4,7 +4,7 @@
 
 ```text
 126 / 163 收件箱
-  -> macOS Native Host 通过 IMAP 只读邮件
+  -> macOS / Windows Native Host 通过 IMAP 只读邮件
   -> 本地规则与用户配置的 AI 模型识别招聘动作
   -> 用户自己的飞书自建应用
   -> 用户自己的飞书多维表格
@@ -15,13 +15,13 @@
 | 能力 | macOS | Windows |
 | --- | --- | --- |
 | 资料管理、简历版本、自动填表 | 支持 | 支持 |
-| IMAP 邮件同步 | 支持 | 暂不支持 |
-| 招聘站后台巡检 | 支持，部分站点需手动核对 | 暂不支持 |
+| IMAP 邮件同步 | 支持 | 开发版支持，待 Windows 真机验收 |
+| 招聘站后台巡检 | 支持，部分站点需手动核对 | 开发版支持，待 Windows 真机验收 |
 | macOS 与 Windows 资料一键迁移 | 尚未支持 | 尚未支持 |
 
-Windows 当前可以安装扩展并重新录入资料，但不能安装现有的 macOS Native Host。
-`chrome.storage.local` 不会可靠地跨设备同步，因此目前没有正式支持的
-macOS -> Windows 资料迁移流程。跨平台加密备份方案见
+Windows Native Host 使用 PowerShell 安装、当前用户注册表和 DPAPI。两套系统运行
+同一个 Python 业务包，但登录态密钥互不兼容。`chrome.storage.local` 不会可靠地
+跨设备同步，因此目前没有正式支持的 macOS -> Windows 资料迁移流程。跨平台加密备份方案见
 [Windows 支持与资料迁移方案](WINDOWS_SUPPORT_PLAN.md)。
 
 ## 一、准备扩展和本地桥接
@@ -37,12 +37,23 @@ macOS -> Windows 资料迁移流程。跨平台加密备份方案见
 4. 选择解压目录。
 5. 记录扩展卡片上的 32 位扩展 ID。
 
-### 2. 安装 macOS Native Host
+### 2. 安装 Native Host
 
-安装 [uv](https://docs.astral.sh/uv/getting-started/installation/) 后，在仓库根目录执行：
+商店扩展 ZIP 不包含 Native Host。可从 GitHub Release 下载
+`jianfill-native-host-*.zip` 并解压，也可以克隆本仓库。安装
+[uv](https://docs.astral.sh/uv/getting-started/installation/) 后，在包含
+`native-host` 目录的位置执行：
+
+macOS：
 
 ```bash
 ./native-host/install.sh <扩展ID>
+```
+
+Windows PowerShell：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\native-host\install-windows.ps1 -ExtensionId <扩展ID>
 ```
 
 安装脚本会：
@@ -50,9 +61,11 @@ macOS -> Windows 资料迁移流程。跨平台加密备份方案见
 - 安装隔离的 Python 运行环境。
 - 安装 Playwright Chromium。
 - 注册 Chrome 和 Edge Native Messaging Host。
-- 将运行文件放入 `~/Library/Application Support/Jianfill Mail Host/`。
+- macOS 运行目录：`~/Library/Application Support/Jianfill Mail Host/`。
+- Windows 运行目录：`%LOCALAPPDATA%\Jianfill\MailHost`。
+- macOS 登录态密钥使用 Keychain，Windows 使用当前用户 DPAPI。
 
-完成后重新加载扩展，在“邮件待办”点击“测试连接”。应显示“本地桥接可用”。
+完成后重新加载扩展，在“邮件待办”点击“测试连接”。应显示平台和 Host 版本。
 
 > Chrome Web Store 上架后，商店版扩展 ID 固定。当前通过 GitHub 解压安装时，每次
 > 重新加载同一目录通常保持 ID，但更换目录或安装来源后应重新运行安装脚本。
@@ -286,7 +299,9 @@ https://example.feishu.cn/base/BASE_TOKEN?table=TABLE_ID&view=VIEW_ID
 ### 本地桥接未安装
 
 - 重新确认扩展 ID。
-- 再运行 `./native-host/install.sh <扩展ID>`。
+- macOS 再运行 `./native-host/install.sh <扩展ID>`。
+- Windows 再运行
+  `powershell -ExecutionPolicy Bypass -File .\native-host\install-windows.ps1 -ExtensionId <扩展ID>`。
 - 在 `chrome://extensions` 重新加载扩展。
 
 ### 邮箱提示账号或密码错误

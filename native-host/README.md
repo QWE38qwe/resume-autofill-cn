@@ -5,29 +5,57 @@ OpenAI-compatible 模型，并更新飞书多维表格。扩展通过标准输�
 请求，桥接不会监听网络端口。
 
 投递进展巡检使用 Playwright 只读已登录招聘网站的投递页，并更新飞书
-`Cookie状态`。首次安装会准备 Chromium；若存在本机 `autotrack` 加密登录态，
-安装脚本会复制密文到运行目录，密钥仍只保存在 macOS Keychain。
+`Cookie状态`。首次安装会准备 Chromium。macOS 登录态密钥保存在 Keychain；
+Windows 登录态密钥由当前用户 DPAPI 保护。
 
 ## 安装
 
 1. 在 `chrome://extensions` 开启开发者模式并加载插件根目录。
 2. 从“简填”扩展卡片复制 32 位扩展 ID。
-3. 运行：
+3. 安装 uv。
+4. 按系统运行：
+
+macOS：
 
 ```bash
-cd "/Users/bytedance/Desktop/简填插件_V0.4.0"
 ./native-host/install.sh <扩展ID>
 ```
 
-脚本使用 `uv` 创建隔离的 Python 3.12 环境，并分别注册 Chrome 与 Edge 的
-Native Messaging manifest。脚本还会从 `.env` 生成权限为 `600` 的
-`local-config.json`，供设置页导入并明文展示本机配置；两者均已被 Git 忽略。
+Windows PowerShell：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\native-host\install-windows.ps1 -ExtensionId <扩展ID>
+```
+
+脚本使用 `uv` 创建隔离的 Python 环境，并分别注册 Chrome 与 Edge 的
+Native Messaging manifest。若仓库 `native-host/.env` 存在，会复制到安装目录；
+扩展也可以直接在设置页保存邮箱、飞书和模型配置。
+
+运行目录：
+
+- macOS：`~/Library/Application Support/Jianfill Mail Host`
+- Windows：`%LOCALAPPDATA%\Jianfill\MailHost`
+
 重新加载扩展后，在“邮件待办”点击“测试连接”。
 
 ## 卸载
 
+macOS：
+
 ```bash
 ./native-host/uninstall.sh
+```
+
+Windows 默认只注销 Chrome / Edge 并保留本地数据：
+
+```powershell
+.\native-host\uninstall-windows.ps1
+```
+
+同时删除本地数据：
+
+```powershell
+.\native-host\uninstall-windows.ps1 -RemoveData
 ```
 
 去重数据库保存在安装目录的 `data/state.db`。删除该文件会使捕捉周期内邮件
