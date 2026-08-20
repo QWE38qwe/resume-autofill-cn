@@ -9,14 +9,16 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, asdict, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from cryptography.fernet import Fernet, InvalidToken
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
 
-from .feishu import FeishuBaseClient, has_link_value, normalize_company
+from .feishu import BaseRecord, FeishuBaseClient, has_link_value, normalize_company
 
 
 TRACKER_ROOT = Path(__file__).resolve().parents[2] / "tracker"
@@ -40,7 +42,7 @@ class ChannelStatus:
     company: str
     status: str
     detail: str
-    job_progress: list[dict[str, str]] = field(default_factory=list)
+    job_progress: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -182,6 +184,13 @@ CHANNELS = (
 )
 
 
+# 这些渠道在无头浏览器里无法可靠还原登录态：百度即使 Cookie 齐全也会被反爬拦到
+# about:blank 空白页；OPPO 的登录 token 不在可导出的 Cookie / localStorage 中，
+# 还原后必然跳登录页误判“已过期”。它们改由扩展读取用户已登录的 Chrome 标签页，
+# 无头巡检时跳过，避免把状态误写成“已过期 / 空白页”。
+CHROME_ONLY_CHANNEL_IDS = frozenset({"baidu", "oppo"})
+
+
 class AuthStore:
     def __init__(self, directory: Path):
         self.directory = directory
@@ -270,6 +279,29 @@ def _matches_any(page: Any, selectors: tuple[str, ...]) -> bool:
     return False
 
 
+def _settle_page(page: Any, selectors: tuple[str, ...], timeout_ms: int = 12000) -> None:
+    """等待 SPA 真正渲染完：先等网络空闲，再轮询关键元素/空态出现。
+
+    投递页多为前端渲染，domcontentloaded 后 DOM 往往还是空壳；固定 sleep 会误判
+    “空白页 / 结构未识别”。这里以关键元素出现为准，最多等 timeout_ms。
+    """
+    try:
+        page.wait_for_load_state("networkidle", timeout=timeout_ms)
+    except PlaywrightTimeout:
+        pass
+    if not selectors:
+        page.wait_for_timeout(1500)
+        return
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        if _matches_any(page, selectors):
+            return
+        # 已跳到登录页就无需继续等待，交给上层判定“已过期”。
+        if any(fragment.casefold() in page.url.casefold() for fragment in ("/login", "passport", "/account", "sso")):
+            return
+        page.wait_for_timeout(500)
+
+
 def _normalize_job_name(value: str) -> str:
     value = re.sub(r"^\d+届(?:提前批|校招|春招)?[-\s]*", "", value)
     return re.sub(r"[\s\-—_（）()]+", "", value).casefold()
@@ -280,11 +312,10 @@ def _field_text(value: Any) -> str:
         return value
     if isinstance(value, list):
         return "".join(
-            str(item.get("text") or "")
+            str(item.get("text") or "") if isinstance(item, dict) else str(item)
             for item in value
-            if isinstance(item, dict)
         )
-    return ""
+    return str(value) if value is not None else ""
 
 
 def _shokz_job_progress(page: Any) -> list[dict[str, str]]:
@@ -309,6 +340,224 @@ def _shokz_job_progress(page: Any) -> list[dict[str, str]]:
     return jobs
 
 
+XIAOMI_PROGRESS_MAP = {
+    "投递简历": "已投递",
+    "评估中": "初筛",
+    "面试中": "待面试",
+    "面试": "待面试",
+    "笔试中": "待笔试",
+    "笔试": "待笔试",
+    "不合适": "已挂",
+    "暂不匹配": "已挂",
+}
+
+PROGRESS_RANK = {
+    "待投递": 0,
+    "还没开始": 0,
+    "已投递": 1,
+    "初筛": 2,
+    "待笔试": 3,
+    "已笔试": 4,
+    "待面试": 5,
+    "已挂": -1,
+}
+
+
+def _date_timestamp(value: str) -> int | None:
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d").replace(
+            tzinfo=ZoneInfo("Asia/Shanghai")
+        )
+    except ValueError:
+        return None
+    return int(parsed.timestamp() * 1000)
+
+
+def _xiaomi_job_progress(page: Any) -> list[dict[str, Any]]:
+    jobs: list[dict[str, Any]] = []
+    cards = page.locator("div.applicationListItem")
+    for index in range(cards.count()):
+        card = cards.nth(index)
+        lines = [
+            line.strip()
+            for line in card.inner_text().splitlines()
+            if line.strip()
+        ]
+        if not lines:
+            continue
+        header = lines[0]
+        header_match = re.match(
+            r"^(?P<job>.+?)第\s*(?P<priority>\d+)\s*志愿$", header
+        )
+        if not header_match:
+            continue
+
+        events: list[tuple[str, str]] = []
+        for line_index, line in enumerate(lines):
+            if (
+                line_index > 0
+                and re.fullmatch(r"\d{4}-\d{2}-\d{2}", line)
+            ):
+                events.append((lines[line_index - 1], line))
+        if not events:
+            continue
+
+        raw_status, latest_date = events[-1]
+        status = XIAOMI_PROGRESS_MAP.get(raw_status, "已投递")
+        city = ""
+        try:
+            city_index = lines.index("意向城市：")
+            city_candidates = [
+                item for item in lines[city_index + 1 :] if not item.isdigit()
+            ]
+            city = city_candidates[0] if city_candidates else ""
+        except ValueError:
+            pass
+
+        source = lines[1] if len(lines) > 1 else ""
+        project = lines[2] if len(lines) > 2 else ""
+        event_summary = " → ".join(f"{name} {date}" for name, date in events)
+        jobs.append(
+            {
+                "priority": header_match.group("priority"),
+                "job": header_match.group("job").strip(),
+                "status": status,
+                "source_status": raw_status,
+                "latest_date": latest_date,
+                "started_at": _date_timestamp(events[0][1]),
+                "city": city,
+                "source": source,
+                "project": project,
+                "event_summary": event_summary,
+            }
+        )
+    return jobs
+
+
+def _matching_job_records(
+    records: list[Any], company: str, job_name: str, feishu: FeishuBaseClient
+) -> list[Any]:
+    source_name = _normalize_job_name(job_name)
+    company_name = normalize_company(company)
+    children = [
+        record
+        for record in records
+        if has_link_value(record.fields.get(feishu.settings.feishu_parent_field))
+        and normalize_company(
+            str(record.fields.get(feishu.settings.feishu_company_field) or "")
+        )
+        == company_name
+    ]
+    exact = [
+        record
+        for record in children
+        if _normalize_job_name(
+            str(record.fields.get(feishu.settings.feishu_position_field) or "")
+        )
+        == source_name
+    ]
+    if exact:
+        return exact
+    fuzzy: list[Any] = []
+    for record in children:
+        candidate_name = _normalize_job_name(
+            str(record.fields.get(feishu.settings.feishu_position_field) or "")
+        )
+        if (
+            source_name
+            and candidate_name
+            and (candidate_name in source_name or source_name in candidate_name)
+        ):
+            fuzzy.append(record)
+    return fuzzy
+
+
+def _sync_xiaomi_job_progress(
+    feishu: FeishuBaseClient,
+    records: list[Any],
+    job_progress: list[dict[str, Any]],
+) -> int:
+    parents = feishu.find_company_parents("小米", records)
+    if len(parents) != 1:
+        return 0
+    parent = parents[0]
+    updated = 0
+
+    for job in job_progress:
+        matches = _matching_job_records(records, "小米", str(job["job"]), feishu)
+        next_fields: dict[str, Any] = {
+            feishu.settings.feishu_progress_field: job["status"],
+            feishu.settings.feishu_subject_field: job["event_summary"],
+        }
+        if len(matches) == 1:
+            record = matches[0]
+            if not record.fields.get(feishu.settings.feishu_received_at_field):
+                next_fields[feishu.settings.feishu_received_at_field] = job["started_at"]
+            if all(
+                _field_text(record.fields.get(name)) == _field_text(value)
+                for name, value in next_fields.items()
+                if value is not None
+            ):
+                continue
+            feishu.update_record_fields(
+                record,
+                {name: value for name, value in next_fields.items() if value is not None},
+            )
+            updated += 1
+            continue
+        if matches:
+            continue
+
+        note_parts = [
+            f"第 {job['priority']} 志愿",
+            str(job.get("city") or ""),
+            str(job.get("project") or ""),
+            str(job.get("source") or ""),
+        ]
+        fields: dict[str, Any] = {
+            feishu.settings.feishu_company_field: "小米",
+            feishu.settings.feishu_position_field: job["job"],
+            feishu.settings.feishu_progress_field: job["status"],
+            feishu.settings.feishu_parent_field: [parent.record_id],
+            feishu.settings.feishu_subject_field: job["event_summary"],
+            feishu.settings.feishu_note_field: " | ".join(
+                part for part in note_parts if part
+            ),
+        }
+        if job.get("started_at") is not None:
+            fields[feishu.settings.feishu_received_at_field] = job["started_at"]
+        new_record_id = feishu.create_record_fields(fields)
+        if new_record_id:
+            records.append(BaseRecord(new_record_id, fields))
+            updated += 1
+
+    active_statuses = [
+        str(job["status"])
+        for job in job_progress
+        if str(job["status"]) != "已挂"
+    ]
+    if active_statuses:
+        summary_status = max(
+            active_statuses, key=lambda status: PROGRESS_RANK.get(status, 0)
+        )
+        if _field_text(
+            parent.fields.get(feishu.settings.feishu_progress_field)
+        ) != summary_status:
+            feishu.update_record_fields(
+                parent, {feishu.settings.feishu_progress_field: summary_status}
+            )
+            updated += 1
+    return updated
+
+
+def _channel_job_progress(channel_id: str, page: Any) -> list[dict[str, Any]]:
+    if channel_id == "shokz":
+        return _shokz_job_progress(page)
+    if channel_id == "xiaomi_feishu":
+        return _xiaomi_job_progress(page)
+    return []
+
+
 def _sync_shokz_job_progress(
     feishu: FeishuBaseClient, records: list[Any], job_progress: list[dict[str, str]]
 ) -> int:
@@ -324,24 +573,32 @@ def _sync_shokz_job_progress(
     updated = 0
     for job in job_progress:
         source_name = _normalize_job_name(job["job"])
-        matches = [
-            record
-            for record in children
-            if _normalize_job_name(str(record.fields.get("岗位") or "")) in source_name
-            or source_name in _normalize_job_name(str(record.fields.get("岗位") or ""))
-        ]
+        matches = []
+        for record in children:
+            candidate_name = _normalize_job_name(
+                str(
+                    record.fields.get(feishu.settings.feishu_position_field)
+                    or ""
+                )
+            )
+            if (
+                source_name
+                and candidate_name
+                and (
+                    candidate_name in source_name
+                    or source_name in candidate_name
+                )
+            ):
+                matches.append(record)
         if len(matches) != 1:
             continue
         record = matches[0]
         next_fields = {
-            "进展": job["status"],
-            "任务描述": f"韶音科技 - {record.fields.get('岗位') or job['job']} - {job['status']}",
+            feishu.settings.feishu_progress_field: job["status"],
         }
-        if (
-            record.fields.get("进展") == next_fields["进展"]
-            and _field_text(record.fields.get("任务描述"))
-            == next_fields["任务描述"]
-        ):
+        if _field_text(
+            record.fields.get(feishu.settings.feishu_progress_field)
+        ) == str(job["status"]):
             continue
         feishu.update_record_fields(record, next_fields)
         updated += 1
@@ -349,6 +606,16 @@ def _sync_shokz_job_progress(
 
 
 def check_channel(channel: Channel, auth_store: AuthStore) -> ChannelStatus:
+    if channel.channel_id in CHROME_ONLY_CHANNEL_IDS:
+        # 交由扩展从已登录的 Chrome 标签页读取（recordVisibleProgress），
+        # 无头巡检不去碰它，以免把已生效的状态误判为“已过期 / 空白页”。
+        return ChannelStatus(
+            channel.channel_id,
+            channel.name,
+            channel.company,
+            "需在Chrome核对",
+            "该站点无法无头巡检，请在已登录的 Chrome 标签页点“② 连接并验证”读取状态",
+        )
     if not auth_store.exists(channel.channel_id):
         return ChannelStatus(
             channel.channel_id, channel.name, channel.company, "未配置", "尚未保存登录态"
@@ -366,7 +633,9 @@ def check_channel(channel: Channel, auth_store: AuthStore) -> ChannelStatus:
             )
             page = context.new_page()
             page.goto(channel.applications_url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(2500)
+            # 等 SPA 真正渲染出投递记录或空态，避免固定 sleep 造成的“空白页”误判。
+            settle_targets = channel.item_selectors + channel.empty_selectors
+            _settle_page(page, settle_targets)
             current_url = page.url.casefold()
             if any(fragment.casefold() in current_url for fragment in channel.login_fragments):
                 return ChannelStatus(
@@ -385,7 +654,17 @@ def check_channel(channel: Channel, auth_store: AuthStore) -> ChannelStatus:
                     channel.company,
                     "生效中",
                     "投递页可读取",
-                    _shokz_job_progress(page) if channel.channel_id == "shokz" else [],
+                    _channel_job_progress(channel.channel_id, page),
+                )
+            # 页面渲染出了正文但没命中已知结构：区分“真空白”与“结构变化”，给出可操作提示。
+            body_text = ""
+            try:
+                body_text = page.locator("body").inner_text(timeout=3000).strip()
+            except Exception:
+                body_text = ""
+            if len(body_text) < 20:
+                return ChannelStatus(
+                    channel.channel_id, channel.name, channel.company, "读取失败", "招聘站返回空白页面"
                 )
             return ChannelStatus(
                 channel.channel_id,
@@ -437,7 +716,11 @@ def start_login(channel_id: str) -> dict[str, str]:
     return {"ok": True, "channelId": channel.channel_id, "name": channel.name}
 
 
-def save_chrome_cookies(channel_id: str, cookies: list[dict[str, Any]]) -> dict[str, Any]:
+def save_chrome_cookies(
+    channel_id: str,
+    cookies: list[dict[str, Any]],
+    storage: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     channel = get_channel(channel_id)
     if not cookies:
         raise ValueError("未读取到登录会话，请先在当前 Chrome 标签页完成登录")
@@ -458,11 +741,45 @@ def save_chrome_cookies(channel_id: str, cookies: list[dict[str, Any]]) -> dict[
                 "strict": "Strict",
             }.get(same_site, "Lax"),
         })
+    origins = _build_origins(storage)
     auth_store = AuthStore(TRACKER_ROOT / "state" / "auth")
     auth_store.save(
-        channel.channel_id, {"cookies": normalized, "origins": []}
+        channel.channel_id, {"cookies": normalized, "origins": origins}
     )
-    return {"ok": True, "channelId": channel.channel_id, "name": channel.name, "cookies": len(normalized)}
+    return {
+        "ok": True,
+        "channelId": channel.channel_id,
+        "name": channel.name,
+        "cookies": len(normalized),
+        "storageKeys": sum(len(o.get("localStorage", [])) for o in origins),
+    }
+
+
+def _build_origins(storage: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """把浏览器读到的 localStorage/sessionStorage 转成 Playwright storage_state 的 origins。
+
+    Playwright 只持久化 localStorage；sessionStorage 无法通过 storage_state 恢复，
+    这里合并进 localStorage 尽量保留 token（多数把 token 放 localStorage 的站可直接生效）。
+    """
+    if not isinstance(storage, dict):
+        return []
+    origin = str(storage.get("origin") or "").strip()
+    if not origin:
+        return []
+    items: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for bucket in ("localStorage", "sessionStorage"):
+        for entry in storage.get(bucket) or []:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name") or "")
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            items.append({"name": name, "value": str(entry.get("value") or "")})
+    if not items:
+        return []
+    return [{"origin": origin, "localStorage": items}]
 
 
 def _monitor_enabled(value: Any) -> bool:
@@ -506,6 +823,10 @@ def run_monitor(feishu: FeishuBaseClient, channel_id: str | None = None) -> dict
     checked_at = int(time.time() * 1000)
     updated = 0
     for channel_status in statuses:
+        # Chrome-only 渠道由扩展侧的可见巡检回写真实状态，无头这一路不写飞书，
+        # 免得用一个占位状态覆盖掉用户在 Chrome 里刚核对出来的“生效中”。
+        if channel_status.channel_id in CHROME_ONLY_CHANNEL_IDS:
+            continue
         parents = feishu.find_company_parents(channel_status.company, records)
         for parent in parents:
             feishu.update_record_fields(
@@ -518,6 +839,10 @@ def run_monitor(feishu: FeishuBaseClient, channel_id: str | None = None) -> dict
             updated += 1
         if channel_status.channel_id == "shokz":
             updated += _sync_shokz_job_progress(
+                feishu, records, channel_status.job_progress
+            )
+        if channel_status.channel_id == "xiaomi_feishu":
+            updated += _sync_xiaomi_job_progress(
                 feishu, records, channel_status.job_progress
             )
     channel_data = []

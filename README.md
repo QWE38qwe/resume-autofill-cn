@@ -48,13 +48,27 @@
 3. 开启“开发者模式”。
 4. 点击“加载已解压的扩展程序”。
 5. 选择仓库根目录。
-6. 在扩展卡片复制扩展 ID，在仓库根目录执行一次本地桥接安装：
+6. 如需邮件同步和后台进展巡检，在 macOS 扩展卡片复制扩展 ID，并执行一次可选的本地桥接安装：
 
 ```bash
 ./native-host/install.sh <扩展ID>
 ```
 
 新安装不会预置任何个人资料。请先在管理台录入资料并创建简历版本。
+
+## 飞书模板
+
+邮件待办和投递进展可使用零数据模板：
+[简填求职追踪模板](https://bytedance.larkoffice.com/base/NY7tbuWraaL8cssuv3ocEydGnQb)。
+模板只保留表、字段、选项和视图结构，不包含维护者的公司记录、邮件、链接或个人资料。
+复制到自己的飞书空间后，在扩展设置中填写自己的 Base Token 和目标 Table ID。
+
+## Windows 支持
+
+Chrome / Edge 中的资料管理、简历版本、字段识别和自动填表可以在 Windows 使用。
+当前 Native Messaging 本地桥接仍只提供 macOS 安装器，因此 Windows 暂不支持 IMAP
+邮件同步和后台招聘站巡检。Windows 安装器、密钥存储和跨设备加密备份的实施方案见
+[Windows 支持与资料迁移方案](docs/WINDOWS_SUPPORT_PLAN.md)。
 
 ## 使用
 

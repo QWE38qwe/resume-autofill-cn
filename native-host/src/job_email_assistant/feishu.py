@@ -232,6 +232,15 @@ class FeishuBaseClient:
         )
         return str(data.get("record", {}).get("record_id") or "")
 
+    def create_record_fields(self, fields: dict[str, Any]) -> str:
+        """Create a Base record from already validated storage-field values."""
+        data = self._request(
+            "POST",
+            f"{self._table_path}/records",
+            json={"fields": fields},
+        )
+        return str(data.get("record", {}).get("record_id") or "")
+
     def update_record_fields(
         self, record: BaseRecord, fields: dict[str, Any]
     ) -> None:

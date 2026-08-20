@@ -150,7 +150,12 @@ def handle(message: dict[str, Any]) -> dict[str, Any]:
         cookies = message.get("cookies")
         if not isinstance(cookies, list):
             raise ValueError("无效的浏览器会话数据")
-        return save_chrome_cookies(str(message.get("channelId") or ""), cookies)
+        storage = message.get("storage")
+        return save_chrome_cookies(
+            str(message.get("channelId") or ""),
+            cookies,
+            storage if isinstance(storage, dict) else None,
+        )
     if action == "recordVisibleProgress":
         settings = Settings.from_payload(message, STATE_DB)
         feishu = FeishuBaseClient(settings)

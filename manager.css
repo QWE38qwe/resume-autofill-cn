@@ -808,6 +808,17 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .progress-state.expired { background: #fff1dd; color: var(--warning); }
 .progress-state.failed { background: #f9e8e6; color: var(--danger); }
 .progress-state.unconfigured { background: #edf0ed; color: var(--caption); }
+.progress-tag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+.progress-tag.manual { background: #eae6f7; color: #5b4bb0; cursor: help; }
 .progress-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
 .progress-filters { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
 .progress-search { display: flex; align-items: center; gap: 7px; min-width: 210px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--caption); }

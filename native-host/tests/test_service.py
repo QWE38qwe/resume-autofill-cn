@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -531,3 +532,49 @@ def test_sync_rejection_marks_parent_hung_and_creates_todo(tmp_path) -> None:
     assert feishu.created[0]["todo_status"] == "待办"
     assert state.processed_outcome("yutong") == "updated"
     service.close()
+
+
+def test_mail_action_snapshot_does_not_persist_message_body() -> None:
+    message = parsed_email(
+        "privacy",
+        "在线测评邀请",
+        datetime(2026, 8, 12, 12, 0, tzinfo=timezone.utc),
+    )
+    result = Extraction(
+        is_recruitment=True,
+        company="示例公司",
+        stage="在线测评",
+    )
+
+    payload = json.loads(serialize_mail_action(message, result))
+
+    assert "text" not in payload["message"]
+    assert payload["extraction"]["company"] == "示例公司"
+
+
+def test_state_store_removes_legacy_message_bodies(tmp_path) -> None:
+    path = tmp_path / "state.db"
+    state = StateStore(path)
+    state.save_mail_action(
+        "legacy-body",
+        "42",
+        json.dumps({
+            "message": {
+                "message_id": "legacy-body",
+                "uid": "42",
+                "subject": "测评邀请",
+                "sender": "jobs@example.invalid",
+                "received_at": "2026-08-12T12:00:00+00:00",
+                "text": "包含个人信息和带 token 的链接",
+            },
+            "extraction": None,
+        }, ensure_ascii=False),
+    )
+    state.close()
+
+    migrated = StateStore(path)
+    saved = migrated.mail_action("legacy-body")
+    migrated.close()
+
+    assert saved is not None
+    assert "text" not in json.loads(saved["snapshot_json"])["message"]

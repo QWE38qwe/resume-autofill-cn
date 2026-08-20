@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,7 +32,26 @@ class StateStore:
             )
             """
         )
+        self._remove_legacy_mail_bodies()
         self.connection.commit()
+
+    def _remove_legacy_mail_bodies(self) -> None:
+        rows = self.connection.execute(
+            "SELECT message_id, snapshot_json FROM mail_actions"
+        ).fetchall()
+        for message_id, snapshot_json in rows:
+            try:
+                payload = json.loads(str(snapshot_json))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            message = payload.get("message")
+            if not isinstance(message, dict) or "text" not in message:
+                continue
+            del message["text"]
+            self.connection.execute(
+                "UPDATE mail_actions SET snapshot_json = ? WHERE message_id = ?",
+                (json.dumps(payload, ensure_ascii=False), message_id),
+            )
 
     def is_processed(self, message_id: str) -> bool:
         return self.processed_outcome(message_id) is not None

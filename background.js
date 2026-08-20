@@ -3,6 +3,10 @@ const MAIL_NATIVE_HOST = "cn.local.jianfill.mail";
 const MAIL_ALARM = "jianfill-mail-sync";
 const PROGRESS_ALARM = "jianfill-progress-monitor";
 const NATIVE_MESSAGE_TIMEOUT_MS = 5 * 60 * 1000;
+// 百度即使 Cookie 齐全也会被反爬拦到 about:blank；OPPO 的登录 token 不在可导出的
+// Cookie/localStorage 中。这两个站点无法无头还原登录态，改为读取用户已登录的
+// Chrome 标签页判定状态。
+const CHROME_ONLY_CHANNELS = new Set(["baidu", "oppo"]);
 
 chrome.runtime.onInstalled.addListener(async () => {
   const current = await chrome.storage.local.get(null);
@@ -404,7 +408,7 @@ async function syncMail({ source = "manual" } = {}) {
 }
 
 async function monitorProgress(channelId = "") {
-  if (channelId === "baidu") return monitorBaiduInChrome();
+  if (CHROME_ONLY_CHANNELS.has(channelId)) return monitorChannelInChrome(channelId);
   const { mailSettings = {}, settings = {}, progressMonitorStatus = {} } =
     await chrome.storage.local.get(["mailSettings", "settings", "progressMonitorStatus"]);
   const startedAt = new Date().toISOString();
@@ -455,32 +459,49 @@ async function monitorProgress(channelId = "") {
   }
 }
 
-async function monitorBaiduInChrome() {
+// 定位当前渠道已登录的投递页标签：优先用“Chrome 登录”记录的标签，
+// 失效时回退到任意打开在该站点的标签，避免用户重开标签后读不到状态。
+async function resolveChannelTabId(channelId, progressLoginTabs) {
+  const savedTabId = progressLoginTabs[channelId];
+  if (savedTabId) {
+    const tab = await chrome.tabs.get(savedTabId).catch(() => null);
+    if (tab?.id) return tab.id;
+  }
+  const expectedUrl = progressChannelUrls[channelId];
+  if (!expectedUrl) return null;
+  const host = new URL(expectedUrl).hostname;
+  const tabs = await chrome.tabs.query({ url: `*://${host}/*` });
+  return tabs[0]?.id ?? null;
+}
+
+async function monitorChannelInChrome(channelId) {
   const { progressLoginTabs = {}, mailSettings = {}, settings = {}, progressMonitorStatus = {} } =
     await chrome.storage.local.get(["progressLoginTabs", "mailSettings", "settings", "progressMonitorStatus"]);
-  const tabId = progressLoginTabs.baidu;
-  if (!tabId) throw new Error("请先点击百度的“Chrome 登录”，在打开标签页完成登录后再刷新");
+  const tabId = await resolveChannelTabId(channelId, progressLoginTabs);
+  if (!tabId) throw new Error("请先点击“① 登录”，在打开的标签页完成登录后再点“② 连接并验证”");
   const [result] = await chrome.scripting.executeScript({
     target: { tabId },
     func: () => ({ url: location.href, text: document.body?.innerText?.slice(0, 3000) || "" })
   });
   const text = result?.result?.text || "";
-  const status = /登录|验证码|手机号登录/.test(text)
+  const url = result?.result?.url || "";
+  const onLoginPage = /\/login|passport|\/account|sso|手机号登录|验证码/.test(`${url} ${text}`);
+  const status = onLoginPage
     ? "已过期"
-    : /投递|应聘|申请|简历/.test(text) ? "生效中" : "读取失败";
+    : /投递|应聘|申请|简历|记录/.test(text) ? "生效中" : "读取失败";
   const detail = status === "生效中"
     ? "当前 Chrome 投递页可读取"
-    : status === "已过期" ? "当前 Chrome 页面要求登录" : "当前 Chrome 页面未识别投递信息";
+    : status === "已过期" ? "当前 Chrome 页面要求登录，请在该标签页重新登录" : "当前 Chrome 页面未识别投递信息";
   const response = await sendNativeMessage({
     ...mailPayload(mailSettings, settings),
     action: "recordVisibleProgress",
-    channelId: "baidu",
+    channelId,
     status,
     detail
   });
-  if (!response.ok) throw new Error(response.error || "百度可见巡检失败");
+  if (!response.ok) throw new Error(response.error || "可见巡检失败");
   const channels = [
-    ...(progressMonitorStatus.channels || []).filter(channel => channel.channel_id !== "baidu"),
+    ...(progressMonitorStatus.channels || []).filter(channel => channel.channel_id !== channelId),
     ...(response.channels || [])
   ];
   const next = {
@@ -529,6 +550,54 @@ async function openChromeProgressLogin(channelId) {
   return { ok: true, tabId: tab.id };
 }
 
+// 招聘站常把登录态放在兄弟子域（passport/sso/account）。按“可注册主域”抓取，
+// 才能把这些跨子域的登录 Cookie 一并保存，否则注入后网站会判为未登录。
+const MULTI_PART_TLDS = new Set([
+  "com.cn", "net.cn", "org.cn", "gov.cn", "edu.cn",
+  "com.hk", "com.tw", "co.jp", "co.uk", "com.sg"
+]);
+
+function registrableDomain(hostname) {
+  const host = String(hostname || "").replace(/^\.+/, "").toLowerCase();
+  const labels = host.split(".").filter(Boolean);
+  if (labels.length <= 2) return host;
+  const lastTwo = labels.slice(-2).join(".");
+  // 处理 shokz.com.cn 这类二级公共后缀，需保留三段。
+  if (MULTI_PART_TLDS.has(lastTwo)) return labels.slice(-3).join(".");
+  return lastTwo;
+}
+
+// 通过投递页执行脚本，读取 localStorage / sessionStorage，
+// 覆盖把 token 放在 storage（北森 / feishu 系）而非 Cookie 的站点。
+async function readTabStorage(tabId, tabUrl) {
+  try {
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const dump = store => {
+          const items = [];
+          try {
+            for (let i = 0; i < store.length; i += 1) {
+              const name = store.key(i);
+              if (name !== null) items.push({ name, value: store.getItem(name) ?? "" });
+            }
+          } catch (error) { /* 跨源或被禁用时忽略 */ }
+          return items;
+        };
+        return {
+          origin: location.origin,
+          localStorage: dump(window.localStorage),
+          sessionStorage: dump(window.sessionStorage)
+        };
+      }
+    });
+    return result?.result || null;
+  } catch (error) {
+    // 无法读取 storage 不应阻断 Cookie 保存，返回空即可。
+    return null;
+  }
+}
+
 async function saveChromeProgressSession(channelId) {
   const { progressLoginTabs = {}, mailSettings = {}, settings = {} } =
     await chrome.storage.local.get(["progressLoginTabs", "mailSettings", "settings"]);
@@ -540,13 +609,18 @@ async function saveChromeProgressSession(channelId) {
   if (!expectedUrl || new URL(tab.url).hostname !== new URL(expectedUrl).hostname) {
     throw new Error("请返回对应招聘网站的登录标签页后再保存会话");
   }
-  const cookies = await chrome.cookies.getAll({ url: tab.url });
+  // 按可注册主域抓取全部子域 Cookie（含 passport/sso/account 等登录态），
+  // 而非仅 tab.url 能收到的那一组。
+  const domain = registrableDomain(new URL(tab.url).hostname);
+  const cookies = await chrome.cookies.getAll({ domain });
   if (!cookies.length) throw new Error("当前页面没有可保存的会话，请确认已完成登录");
+  const storage = await readTabStorage(tabId, tab.url);
   const response = await sendNativeMessage({
     ...mailPayload(mailSettings, settings),
     action: "saveProgressCookies",
     channelId,
-    cookies
+    cookies,
+    storage
   });
   if (!response.ok) throw new Error(response.error || "保存登录会话失败");
   return response;
@@ -555,6 +629,37 @@ async function saveChromeProgressSession(channelId) {
 // 一步式向导：保存会话 → 立即验证 → 回写飞书，合并为一次调用，避免用户在
 // “保存会话 / 刷新验证”之间来回点击与串联 alert。
 async function saveAndVerifyProgressSession(channelId) {
+  // 百度 / OPPO 无法无头还原登录态，保存 Cookie 没有意义。直接读取已登录的
+  // Chrome 标签页判定状态并回写飞书。
+  if (CHROME_ONLY_CHANNELS.has(channelId)) {
+    try {
+      const verified = await monitorChannelInChrome(channelId);
+      const channel = (verified.channels || []).find(item => item.channel_id === channelId);
+      return {
+        ok: true,
+        saved: true,
+        verified: true,
+        chromeOnly: true,
+        name: channel?.name || "",
+        savedCookies: 0,
+        updated: verified.updated || 0,
+        status: channel?.status || "",
+        detail: channel?.detail || "",
+        ...verified
+      };
+    } catch (error) {
+      const message = error?.message || "验证失败";
+      return {
+        ok: true,
+        saved: false,
+        verified: false,
+        chromeOnly: true,
+        savedCookies: 0,
+        needsMonitorToggle: message.includes("是否巡检"),
+        verifyError: message
+      };
+    }
+  }
   const saved = await saveChromeProgressSession(channelId);
   try {
     const verified = await monitorProgress(channelId);

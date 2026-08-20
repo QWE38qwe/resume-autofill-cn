@@ -67,7 +67,6 @@ def serialize_mail_action(message: ParsedEmail, result: Extraction | None) -> st
                 "subject": message.subject,
                 "sender": message.sender,
                 "received_at": message.received_at.isoformat(),
-                "text": message.text,
             },
             "extraction": {
                 "is_recruitment": result.is_recruitment,
@@ -96,7 +95,7 @@ def deserialize_mail_action(snapshot_json: str) -> tuple[ParsedEmail, Extraction
         subject=source["subject"],
         sender=source["sender"],
         received_at=datetime.fromisoformat(source["received_at"]),
-        text=source["text"],
+        text="",
     )
     extraction = payload.get("extraction")
     if not extraction:

@@ -6,6 +6,7 @@
 *.pfx
 .env
 .env.*
+HANDOFF.md
 .dbg/
 debug-*.md
 dist/

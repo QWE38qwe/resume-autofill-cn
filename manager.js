@@ -1,6 +1,10 @@
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 
+// 百度 / OPPO 无法后台无头巡检（反爬拦截 + 登录态不可导出），只能靠用户打开
+// 已登录的 Chrome 标签页手动核对。这里给它们在渠道列表打持久“手动核对”标记。
+const CHROME_ONLY_CHANNELS = new Set(["baidu", "oppo"]);
+
 function safe(value) {
   const node = document.createElement("div");
   node.textContent = value ?? "";
@@ -1363,6 +1367,7 @@ function progressStatusClass(status) {
     "生效中": "live",
     "已过期": "expired",
     "读取失败": "failed",
+    "需在Chrome核对": "unconfigured",
     "未配置": "unconfigured"
   }[status] || "unconfigured";
 }
@@ -1401,7 +1406,7 @@ function renderProgressMonitor() {
       <thead><tr><th>公司</th><th>状态</th><th>投递链接</th><th>最近检测</th><th>操作</th></tr></thead>
       <tbody>${channels.map(channel => `
         <tr>
-          <td><strong>${safe(channel.name)}</strong><small>${safe(channel.detail || "")}</small></td>
+          <td><strong>${safe(channel.name)}${CHROME_ONLY_CHANNELS.has(channel.channel_id) ? '<span class="progress-tag manual" title="该站点反爬且登录态不可导出，无法后台自动巡检，需在已登录的 Chrome 标签页手动核对">手动核对</span>' : ""}</strong><small>${safe(channel.detail || "")}</small></td>
           <td><span class="progress-state ${progressStatusClass(channel.status)}">${safe(channel.status)}</span></td>
           <td>${httpUrl(channel.applicationUrl) ? `<a class="mail-open" href="${safeAttr(httpUrl(channel.applicationUrl))}" target="_blank" rel="noopener">打开投递 ↗</a>` : '<span class="cell-empty">—</span>'}</td>
           <td>${monitor.finishedAt ? safe(formatMailTime(monitor.finishedAt)) : '<span class="cell-empty">—</span>'}</td>
@@ -1647,7 +1652,12 @@ $("#progressChannelList").addEventListener("click", async event => {
         }
       } else {
         const label = result.status ? `状态：${result.status}` : "已回写飞书";
-        toast(`已连接 ${result.name || ""}（${result.savedCookies || 0} 条会话）· ${label}`, "success");
+        if (result.chromeOnly) {
+          // 百度 / OPPO 从已登录的 Chrome 标签页读取，没有“保存会话”的概念。
+          toast(`已从当前 Chrome 标签页读取 ${result.name || ""} · ${label}`, "success");
+        } else {
+          toast(`已连接 ${result.name || ""}（${result.savedCookies || 0} 条会话）· ${label}`, "success");
+        }
       }
     } catch (error) {
       toast(error.message || "保存并验证登录态失败", "error");
