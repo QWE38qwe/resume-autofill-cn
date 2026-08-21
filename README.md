@@ -151,6 +151,7 @@ Windows 11 x64 现可通过 PowerShell 安装开发版 Native Host，使用同�
 - 原生 input、textarea、select、radio、checkbox、date 和 month。
 - 可搜索下拉、按钮组、地区选择器和年月拆分控件。
 - Ant Design、Element、iView、Phoenix 和 `sd-Select`。
+- 飞书招聘 ATSX 月份范围组件，包括开始/结束年月与“至今”。
 - iframe、开放 Shadow DOM、动态追加记录。
 - “工作信息 N”等非标准重复经历布局。
 - 京东校招重复经历：区分侧栏导航和真实表单区域，避免重复追加教育记录及跨区域写入实习内容。
@@ -176,6 +177,7 @@ python3 -m http.server 8877
 # 浏览器访问 http://127.0.0.1:8877/tests/jd-fixture.html
 # 浏览器访问 http://127.0.0.1:8877/tests/hotjob-basic-fixture.html
 # 浏览器访问 http://127.0.0.1:8877/tests/hotjob-work-fixture.html
+# 浏览器访问 http://127.0.0.1:8877/tests/feishu-date-range-fixture.html
 # 浏览器访问 http://127.0.0.1:8877/tests/avatar-fixture.html
 ```
 

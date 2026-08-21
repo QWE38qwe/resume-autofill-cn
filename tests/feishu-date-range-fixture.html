@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Feishu ATSX date range fixture</title>
+  <style>
+    body { font: 16px sans-serif; }
+    section, .record { margin: 20px; padding: 16px; border: 1px solid #ccc; }
+    label { display: block; margin: 8px 0; }
+    input, textarea { padding: 8px; }
+    .atsx-calendar-picker { display: inline-block; padding: 4px; border: 1px solid #999; }
+    .atsx-calendar-range { display: flex; position: fixed; inset: 60px auto auto 60px; z-index: 10; background: white; border: 1px solid #333; }
+    .atsx-calendar-range[hidden] { display: none; }
+    .atsx-calendar-range-part { width: 260px; padding: 12px; }
+    .atsx-calendar-month-panel-cell { display: inline-block; width: 25%; padding: 6px 0; text-align: center; }
+    .atsx-calendar-month-panel-month { cursor: pointer; }
+  </style>
+</head>
+<body>
+  <section id="education">
+    <h2>教育经历</h2>
+    <div class="record education-record">
+      <label>学校名称<input value="已有大学"></label>
+      <label>专业<input value="已有专业"></label>
+      <label>起止时间
+        <span class="atsx-calendar-picker" data-range="education">
+          <input class="atsx-calendar-range-picker-input atsx-calendar-range-picker-input-left" value="2019-09" readonly>
+          <span class="atsx-calendar-range-picker-separator">至</span>
+          <input class="atsx-calendar-range-picker-input atsx-calendar-range-picker-input-right" value="2023-06" readonly>
+        </span>
+      </label>
+    </div>
+  </section>
+
+  <section id="work">
+    <h2>工作经历</h2>
+    <div class="record work-record">
+      <label>公司名称<input placeholder="请输入公司名称"></label>
+      <label>职位名称<input placeholder="请输入职位名称"></label>
+      <label>起止时间
+        <span class="atsx-calendar-picker" data-range="work-0">
+          <input class="atsx-calendar-range-picker-input atsx-calendar-range-picker-input-left" placeholder="开始时间" readonly>
+          <span class="atsx-calendar-range-picker-separator">至</span>
+          <input class="atsx-calendar-range-picker-input atsx-calendar-range-picker-input-right" placeholder="结束时间" readonly>
+        </span>
+      </label>
+      <label><input type="checkbox" class="current-work">我当前在这工作</label>
+      <label>描述<textarea></textarea></label>
+    </div>
+    <div class="record work-record">
+      <label>公司名称<input placeholder="请输入公司名称"></label>
+      <label>职位名称<input placeholder="请输入职位名称"></label>
+      <label>起止时间
+        <span class="atsx-calendar-picker" data-range="work-1">
+          <input class="atsx-calendar-range-picker-input atsx-calendar-range-picker-input-left" placeholder="开始时间" readonly>
+          <span class="atsx-calendar-range-picker-separator">至</span>
+          <input class="atsx-calendar-range-picker-input atsx-calendar-range-picker-input-right" placeholder="结束时间" readonly>
+        </span>
+      </label>
+      <label><input type="checkbox" class="current-work">我当前在这工作</label>
+      <label>描述<textarea></textarea></label>
+    </div>
+  </section>
+
+  <div class="atsx-calendar-range" hidden>
+    <div class="atsx-calendar-range-part atsx-calendar-range-left"></div>
+    <div class="atsx-calendar-range-part atsx-calendar-range-right"></div>
+  </div>
+  <pre id="result">not-run</pre>
+
+  <script>
+    const fixtureStore = {
+      personal: {},
+      education: [{
+        school: "应保留的新大学",
+        major: "应保留的新专业",
+        start: "2020-09",
+        end: "2024-06"
+      }],
+      profiles: [{
+        id: "fixture-profile",
+        name: "测试简历",
+        work: [{
+          company: "甲公司",
+          position: "产品经理",
+          start: "2023-04",
+          end: "2024-08",
+          description: "第一段经历"
+        }, {
+          company: "乙公司",
+          position: "产品实习生",
+          start: "2025-01",
+          end: "至今",
+          current: true,
+          description: "第二段经历"
+        }]
+      }],
+      activeProfileId: "fixture-profile",
+      projects: [],
+      languages: [],
+      skills: [],
+      awards: [],
+      papers: [],
+      certificates: [],
+      portfolio: [],
+      customFields: [],
+      settings: {}
+    };
+
+    let contentListener;
+    let activePicker = null;
+    let phase = "start";
+    const overlay = document.querySelector(".atsx-calendar-range");
+
+    window.chrome = {
+      storage: {
+        local: {
+          get: async keys => Object.fromEntries(keys.map(key => [key, fixtureStore[key]]))
+        }
+      },
+      runtime: {
+        sendMessage: async () => ({ matches: [], source: "disabled" }),
+        onMessage: {
+          addListener: listener => {
+            contentListener = listener;
+          }
+        }
+      }
+    };
+
+    function renderPanel(side, year) {
+      const part = overlay.querySelector(`.atsx-calendar-range-${side}`);
+      part.dataset.year = String(year);
+      part.innerHTML = `
+        <div class="atsx-calendar-month-panel">
+          <button class="atsx-calendar-month-panel-prev-year-btn" type="button">上一年</button>
+          <span class="atsx-calendar-month-panel-year-select">${year}年</span>
+          <button class="atsx-calendar-month-panel-next-year-btn" type="button">下一年</button>
+          <div>${Array.from({ length: 12 }, (_, index) => `
+            <span class="atsx-calendar-month-panel-cell">
+              <span class="atsx-calendar-month-panel-month">${index + 1}月</span>
+            </span>`).join("")}
+          </div>
+        </div>`;
+      part.querySelector(".atsx-calendar-month-panel-prev-year-btn").onclick = () => renderPanel(side, year - 1);
+      part.querySelector(".atsx-calendar-month-panel-next-year-btn").onclick = () => renderPanel(side, year + 1);
+      part.querySelectorAll(".atsx-calendar-month-panel-month").forEach((month, index) => {
+        month.onclick = () => {
+          const inputs = activePicker.querySelectorAll(".atsx-calendar-range-picker-input");
+          if (phase === "start") {
+            inputs[0].value = `${year}-${String(index + 1).padStart(2, "0")}`;
+            phase = "end";
+          } else {
+            inputs[1].value = `${year}-${String(index + 1).padStart(2, "0")}`;
+            overlay.hidden = true;
+          }
+          inputs.forEach(input => input.dispatchEvent(new Event("change", { bubbles: true })));
+        };
+      });
+    }
+
+    document.querySelectorAll(".atsx-calendar-picker").forEach(picker => {
+      picker.onclick = () => {
+        activePicker = picker;
+        phase = "start";
+        renderPanel("left", 2026);
+        renderPanel("right", 2027);
+        overlay.hidden = false;
+      };
+    });
+    document.querySelectorAll(".current-work").forEach(checkbox => {
+      checkbox.addEventListener("click", () => {
+        checkbox.dataset.clicks = String(Number(checkbox.dataset.clicks || 0) + 1);
+      });
+      checkbox.onchange = () => {
+        if (!checkbox.checked) return;
+        checkbox.closest(".record").querySelector(".atsx-calendar-range-picker-input-right").value = "至今";
+        overlay.hidden = true;
+      };
+    });
+
+    window.runFeishuDateRangeFixture = () => new Promise((resolve, reject) => {
+      if (!contentListener) {
+        reject(new Error("content listener not registered"));
+        return;
+      }
+      contentListener({ type: "FILL_FORM", mode: "supplement" }, {}, response => {
+        const educationDates = [...document.querySelectorAll(
+          ".education-record .atsx-calendar-range-picker-input"
+        )].map(input => input.value);
+        const workDates = [...document.querySelectorAll(".work-record")].map(record =>
+          [...record.querySelectorAll(".atsx-calendar-range-picker-input")].map(input => input.value)
+        );
+        const result = {
+          response,
+          educationDates,
+          workDates,
+          current: document.querySelectorAll(".current-work")[1].checked,
+          currentClicks: [...document.querySelectorAll(".current-work")].map(
+            checkbox => Number(checkbox.dataset.clicks || 0)
+          )
+        };
+        result.pass =
+          educationDates[0] === "2019-09" &&
+          educationDates[1] === "2023-06" &&
+          workDates[0][0] === "2023-04" &&
+          workDates[0][1] === "2024-08" &&
+          workDates[1][0] === "2025-01" &&
+          workDates[1][1] === "至今" &&
+          result.current;
+        document.querySelector("#result").textContent = JSON.stringify(result, null, 2);
+        resolve(result);
+      });
+    });
+  </script>
+  <script src="../content.js"></script>
+</body>
+</html>

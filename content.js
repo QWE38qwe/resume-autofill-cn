@@ -915,6 +915,144 @@ async function choosePhoenixMonth(element, value) {
   return Boolean(selectedValue && !isPlaceholderValue(selectedValue));
 }
 
+function visibleAtsxMonthPanel(side) {
+  const range = visibleOne(".atsx-calendar-range");
+  if (!range) return null;
+  const part = range.querySelector(`.atsx-calendar-range-${side}`);
+  if (!part) return null;
+  return [...part.querySelectorAll(".atsx-calendar-month-panel")].find(isVisible) || null;
+}
+
+async function chooseAtsxRangeMonth(side, value) {
+  const date = splitDate(value);
+  const targetYear = Number(date.year);
+  const targetMonth = Number(date.month);
+  if (!targetYear || !targetMonth) return false;
+
+  let panel = visibleAtsxMonthPanel(side);
+  if (!panel) {
+    const range = visibleOne(".atsx-calendar-range");
+    const monthSwitch = [...(range?.querySelectorAll(
+      `.atsx-calendar-range-${side} .atsx-calendar-month-select`
+    ) || [])].find(isVisible);
+    if (monthSwitch) {
+      clickElement(monthSwitch);
+      await sleep(120);
+      panel = visibleAtsxMonthPanel(side);
+    }
+  }
+  if (!panel) return false;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const shownYear = Number(
+      normalizeText(panel.querySelector(".atsx-calendar-month-panel-year-select")?.textContent)
+        .match(/\d{4}/)?.[0] || 0
+    );
+    if (!shownYear || shownYear === targetYear) break;
+    const selector = shownYear > targetYear
+      ? ".atsx-calendar-month-panel-prev-year-btn"
+      : ".atsx-calendar-month-panel-next-year-btn";
+    const button = panel.querySelector(selector);
+    if (!button) return false;
+    clickElement(button);
+    await sleep(70);
+    panel = visibleAtsxMonthPanel(side);
+    if (!panel) return false;
+  }
+
+  const shownYear = Number(
+    normalizeText(panel.querySelector(".atsx-calendar-month-panel-year-select")?.textContent)
+      .match(/\d{4}/)?.[0] || 0
+  );
+  if (shownYear && shownYear !== targetYear) return false;
+  const cells = [...panel.querySelectorAll(".atsx-calendar-month-panel-cell")]
+    .filter(cell => !cell.classList.contains("atsx-calendar-month-panel-cell-disabled"));
+  const monthCell = cells.find(cell =>
+    Number(normalizeText(
+      cell.querySelector(".atsx-calendar-month-panel-month")?.textContent || cell.textContent
+    ).match(/\d+/)?.[0] || 0) === targetMonth
+  );
+  if (!monthCell) return false;
+  clickElement(monthCell.querySelector(".atsx-calendar-month-panel-month") || monthCell);
+  await sleep(180);
+  return true;
+}
+
+function recordWantsPresent(record) {
+  if (/^(true|1|是|至今|仍在职|仍在进行|present|current|now)$/i.test(String(record?.current ?? "").trim())) {
+    return true;
+  }
+  return /^(至今|现在|今|present|current|now)$/i.test(String(record?.end || "").trim());
+}
+
+function currentRangeControl(block) {
+  const controls = queryAllDeep(block, "input[type=checkbox],[role=checkbox]");
+  const matchedControl = controls.find(element =>
+    /我当前在这工作|目前仍在职|当前仍在职|仍在进行|至今|currentlyworkhere|present/.test(
+      normalizeText(`${labelOf(element)} ${element.innerText || element.textContent || ""}`)
+    )
+  );
+  if (matchedControl) return matchedControl;
+  const label = queryAllDeep(block, "label").find(element =>
+    /我当前在这工作|目前仍在职|当前仍在职|仍在进行|至今|currentlyworkhere|present/.test(
+      normalizeText(directText(element))
+    )
+  );
+  return label?.querySelector("input[type=checkbox],[role=checkbox]") || null;
+}
+
+function checkboxIsChecked(element) {
+  if (element instanceof HTMLInputElement) return element.checked;
+  return element?.getAttribute?.("aria-checked") === "true" ||
+    element?.classList?.contains("checked") ||
+    Boolean(element?.querySelector?.("input[type=checkbox]:checked,[role=checkbox][aria-checked=true]"));
+}
+
+async function fillAtsxDateRange(block, record, overwrite, used) {
+  const wrappers = queryAllDeep(block, ".atsx-calendar-picker").filter(wrapper => {
+    const inputs = wrapper.querySelectorAll(".atsx-calendar-range-picker-input");
+    return inputs.length >= 2 && [...inputs].some(input => !used.has(input));
+  });
+  const wrapper = wrappers[0];
+  if (!wrapper) return { handled: false, filled: 0, failed: 0 };
+
+  const inputs = [...wrapper.querySelectorAll(".atsx-calendar-range-picker-input")].slice(0, 2);
+  inputs.forEach(input => used.add(input));
+  const existing = inputs.map(input => String(input.value || "").trim());
+  if (!overwrite && existing.some(value => value && !isPlaceholderValue(value))) {
+    return { handled: true, filled: 0, failed: 0 };
+  }
+
+  const wantsPresent = recordWantsPresent(record);
+  const currentControl = currentRangeControl(block);
+  if (overwrite && currentControl && checkboxIsChecked(currentControl) !== wantsPresent) {
+    clickElement(currentControl);
+    await sleep(120);
+  }
+
+  if (!record.start) return { handled: true, filled: 0, failed: 1 };
+  clickElement(wrapper);
+  await sleep(180);
+  const startSelected = await chooseAtsxRangeMonth("left", record.start);
+  if (!startSelected) {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    return { handled: true, filled: 0, failed: 1 };
+  }
+
+  if (wantsPresent && currentControl) {
+    if (!checkboxIsChecked(currentControl)) clickElement(currentControl);
+    await sleep(140);
+    return { handled: true, filled: 2, failed: 0 };
+  }
+  if (!record.end) return { handled: true, filled: 1, failed: 1 };
+
+  const endSelected = await chooseAtsxRangeMonth("right", record.end);
+  if (!endSelected) {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    return { handled: true, filled: 1, failed: 1 };
+  }
+  return { handled: true, filled: 2, failed: 0 };
+}
+
 async function chooseAntDate(element, value) {
   const picker = element.closest?.(".ant-calendar-picker");
   if (!picker) return false;
@@ -1280,6 +1418,9 @@ function controlCurrentValue(element) {
   if (element instanceof HTMLSelectElement) {
     return element.selectedOptions?.[0]?.textContent?.trim() || element.value || "";
   }
+  if (element.matches?.(".atsx-calendar-range-picker-input")) {
+    return String(element.value || "").trim();
+  }
   const wrapper = selectWrapperFor(element);
   if (wrapper) {
     const display = wrapper.querySelector([
@@ -1580,11 +1721,20 @@ async function fillWorkByLayout(block, record, overwrite, used) {
     }
   }
 
-  const partsResult = await fillYearMonthParts(block, record, overwrite, used);
-  filled += partsResult.filled;
-  if (partsResult.handled) {
-    notes.push("起止年月");
+  const atsxResult = await fillAtsxDateRange(block, record, overwrite, used);
+  let dateFailed = atsxResult.failed;
+  let partsResult = { filled: 0, failed: 0, handled: false };
+  if (atsxResult.handled) {
+    filled += atsxResult.filled;
+    notes.push("起止年月（飞书范围组件）");
   } else {
+    partsResult = await fillYearMonthParts(block, record, overwrite, used);
+    filled += partsResult.filled;
+    dateFailed += partsResult.failed;
+  }
+  if (!atsxResult.handled && partsResult.handled) {
+    notes.push("起止年月");
+  } else if (!atsxResult.handled && !partsResult.handled) {
     if (startControl && record.start && (overwrite || isBlankControl(startControl))) {
       const selected = await choosePhoenixMonth(startControl, record.start);
       if (!selected) forceNativeValue(startControl, formatDateValue(startControl, record.start));
@@ -1613,7 +1763,7 @@ async function fillWorkByLayout(block, record, overwrite, used) {
     }
   }
 
-  return { filled, failed: partsResult.failed, handledKeys, notes, diagnostics };
+  return { filled, failed: dateFailed, handledKeys, notes, diagnostics };
 }
 
 function recordContainer(anchor, root, anchorControls, definition) {
@@ -1792,12 +1942,16 @@ async function fillYearMonthParts(block, record, overwrite, used) {
 async function fillDateRange(block, record, overwrite, used) {
   const startAliases = ["开始时间", "起始时间", "入学时间", "就读开始时间", "开始日期", "起止时间", "start date", "from"];
   const endAliases = ["结束时间", "毕业时间", "离职时间", "就读结束时间", "结束日期", "end date", "to"];
+  const atsxResult = await fillAtsxDateRange(block, record, overwrite, used);
+  if (atsxResult.handled) return atsxResult.filled;
   const partsResult = await fillYearMonthParts(block, record, overwrite, used);
   if (partsResult.handled) return partsResult.filled;
   let filled = 0;
 
   const startControl = findControlByAliases(block, startAliases, used, "start");
-  const endControl = findControlByAliases(block, endAliases, used, "end");
+  const endUsed = new Set(used);
+  if (startControl) endUsed.add(startControl);
+  const endControl = findControlByAliases(block, endAliases, endUsed, "end");
   if (startControl && record.start) {
     if (await fillControl(startControl, record.start, overwrite) === "filled") filled += 1;
     used.add(startControl);
