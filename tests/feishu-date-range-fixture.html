@@ -8,6 +8,9 @@
     section, .record { margin: 20px; padding: 16px; border: 1px solid #ccc; }
     label { display: block; margin: 8px 0; }
     input, textarea { padding: 8px; }
+    .atsx-select { display: inline-block; min-width: 240px; padding: 8px; border: 1px solid #999; cursor: pointer; }
+    .atsx-select-dropdown { position: fixed; z-index: 20; min-width: 240px; padding: 4px; background: white; border: 1px solid #333; }
+    .atsx-select-dropdown-menu-item { padding: 6px; cursor: pointer; }
     .atsx-calendar-picker { display: inline-block; padding: 4px; border: 1px solid #999; }
     .atsx-calendar-range { display: flex; position: fixed; inset: 60px auto auto 60px; z-index: 10; background: white; border: 1px solid #333; }
     .atsx-calendar-range[hidden] { display: none; }
@@ -21,12 +24,30 @@
     <h2>教育经历</h2>
     <div class="record education-record">
       <label>学校名称<input value="已有大学"></label>
+      <label>学历
+        <span class="atsx-select" data-select="degree">
+          <span class="atsx-select-selection__placeholder">请选择</span>
+          <span class="atsx-select-selection-selected-value"></span>
+        </span>
+      </label>
       <label>专业<input value="已有专业"></label>
       <label>起止时间
         <span class="atsx-calendar-picker" data-range="education">
-          <input class="atsx-calendar-range-picker-input atsx-calendar-range-picker-input-left" value="2019-09" readonly>
+          <input class="atsx-calendar-range-picker-input atsx-calendar-range-picker-input-left" value="2024-07" readonly>
           <span class="atsx-calendar-range-picker-separator">至</span>
-          <input class="atsx-calendar-range-picker-input atsx-calendar-range-picker-input-right" value="2023-06" readonly>
+          <input class="atsx-calendar-range-picker-input atsx-calendar-range-picker-input-right" readonly>
+        </span>
+      </label>
+      <label>学历类型
+        <span class="atsx-select" data-select="education-type">
+          <span class="atsx-select-selection__placeholder">请选择</span>
+          <span class="atsx-select-selection-selected-value"></span>
+        </span>
+      </label>
+      <label>成绩排名
+        <span class="atsx-select" data-select="rank">
+          <span class="atsx-select-selection__placeholder">请选择</span>
+          <span class="atsx-select-selection-selected-value"></span>
         </span>
       </label>
     </div>
@@ -74,8 +95,11 @@
       education: [{
         school: "应保留的新大学",
         major: "应保留的新专业",
-        start: "2020-09",
-        end: "2024-06"
+        level: "硕士研究生",
+        type: "全日制",
+        rank: "Top 10%",
+        start: "2024-07",
+        end: "2027-06"
       }],
       profiles: [{
         id: "fixture-profile",
@@ -109,6 +133,7 @@
 
     let contentListener;
     let activePicker = null;
+    let activeSelect = null;
     let phase = "start";
     const overlay = document.querySelector(".atsx-calendar-range");
 
@@ -162,10 +187,39 @@
     document.querySelectorAll(".atsx-calendar-picker").forEach(picker => {
       picker.onclick = () => {
         activePicker = picker;
-        phase = "start";
+        phase = picker.querySelector(".atsx-calendar-range-picker-input-left").value ? "end" : "start";
         renderPanel("left", 2026);
         renderPanel("right", 2027);
         overlay.hidden = false;
+      };
+    });
+    const selectOptions = {
+      degree: ["博士", "MBA", "硕士", "本科", "大专", "高中", "其他"],
+      "education-type": ["海外及港澳台", "统招全日制", "统招非全日制", "自考", "其他"],
+      rank: ["前 5%", "前 10%", "前 20%", "前 30%", "前 50%", "其他"]
+    };
+    document.querySelectorAll(".atsx-select").forEach(select => {
+      select.onclick = () => {
+        activeSelect = select;
+        document.querySelector(".atsx-select-dropdown")?.remove();
+        const dropdown = document.createElement("div");
+        const rect = select.getBoundingClientRect();
+        dropdown.className = "atsx-select-dropdown";
+        dropdown.style.left = `${rect.left}px`;
+        dropdown.style.top = `${rect.bottom + 2}px`;
+        selectOptions[select.dataset.select].forEach(value => {
+          const option = document.createElement("div");
+          option.className = "atsx-select-dropdown-menu-item";
+          option.textContent = value;
+          option.onclick = event => {
+            event.stopPropagation();
+            activeSelect.querySelector(".atsx-select-selection-selected-value").textContent = value;
+            activeSelect.querySelector(".atsx-select-selection__placeholder")?.remove();
+            dropdown.remove();
+          };
+          dropdown.append(option);
+        });
+        document.body.append(dropdown);
       };
     });
     document.querySelectorAll(".current-work").forEach(checkbox => {
@@ -191,9 +245,16 @@
         const workDates = [...document.querySelectorAll(".work-record")].map(record =>
           [...record.querySelectorAll(".atsx-calendar-range-picker-input")].map(input => input.value)
         );
+        const educationChoices = Object.fromEntries(
+          [...document.querySelectorAll(".education-record .atsx-select")].map(select => [
+            select.dataset.select,
+            select.querySelector(".atsx-select-selection-selected-value").textContent
+          ])
+        );
         const result = {
           response,
           educationDates,
+          educationChoices,
           workDates,
           current: document.querySelectorAll(".current-work")[1].checked,
           currentClicks: [...document.querySelectorAll(".current-work")].map(
@@ -201,8 +262,11 @@
           )
         };
         result.pass =
-          educationDates[0] === "2019-09" &&
-          educationDates[1] === "2023-06" &&
+          educationDates[0] === "2024-07" &&
+          educationDates[1] === "2027-06" &&
+          educationChoices.degree === "硕士" &&
+          educationChoices["education-type"] === "统招全日制" &&
+          educationChoices.rank === "前 10%" &&
           workDates[0][0] === "2023-04" &&
           workDates[0][1] === "2024-08" &&
           workDates[1][0] === "2025-01" &&

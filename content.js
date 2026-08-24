@@ -251,12 +251,15 @@ function controls(root = document) {
     "input:not([type=hidden]):not([type=file])",
     "textarea",
     "select",
+    ".atsx-select",
     "[contenteditable=true]",
     "[role=combobox]"
   ].join(",");
   const result = [];
   queryAllDeep(root, selectors).forEach(element => {
     if (!isVisible(element) || element.disabled || element.getAttribute("aria-disabled") === "true") return;
+    const atsxWrapper = element.closest?.(".atsx-select");
+    if (atsxWrapper && element !== atsxWrapper) return;
     if (element.matches("[role=combobox]") && element.querySelector("input,textarea,select")) return;
     if (!result.includes(element)) result.push(element);
   });
@@ -264,7 +267,7 @@ function controls(root = document) {
 }
 
 function customSelectControls(root = document, baseControls = controls(root)) {
-  return queryAllDeep(root, ".phoenix-select,.ant-select")
+  return queryAllDeep(root, ".phoenix-select,.ant-select,.atsx-select")
     .filter(element => {
       if (!isVisible(element) || element.getAttribute("aria-disabled") === "true") return false;
       return !baseControls.some(control => element.contains(control));
@@ -331,6 +334,8 @@ function shortText(element) {
 function labelOf(element) {
   const pieces = [];
   const root = ownerRoot(element);
+  const wrappingLabel = element.closest?.("label");
+  if (wrappingLabel) pieces.push(directText(wrappingLabel));
   const id = element.id;
   if (id) {
     try {
@@ -527,7 +532,7 @@ function nearestControlsFromLabel(root, labelNode, key, used) {
 function findControlNearLabel(root, aliases, key, used) {
   let best = null;
   queryAllDeep(root, "label,span,div,p,dt,dd").forEach(node => {
-    if (!isVisible(node) || queryAllDeep(node, "input,textarea,select,[role=combobox]").length) return;
+    if (!isVisible(node) || queryAllDeep(node, "input,textarea,select,.atsx-select,[role=combobox]").length) return;
     const text = `${directText(node)} ${node.getAttribute("aria-label") || ""}`.trim();
     if (!text || text.length > 80) return;
     const match = bestAlias(text, aliases);
@@ -1018,7 +1023,9 @@ async function fillAtsxDateRange(block, record, overwrite, used) {
   const inputs = [...wrapper.querySelectorAll(".atsx-calendar-range-picker-input")].slice(0, 2);
   inputs.forEach(input => used.add(input));
   const existing = inputs.map(input => String(input.value || "").trim());
-  if (!overwrite && existing.some(value => value && !isPlaceholderValue(value))) {
+  const hasStart = Boolean(existing[0] && !isPlaceholderValue(existing[0]));
+  const hasEnd = Boolean(existing[1] && !isPlaceholderValue(existing[1]));
+  if (!overwrite && hasStart && hasEnd) {
     return { handled: true, filled: 0, failed: 0 };
   }
 
@@ -1029,28 +1036,33 @@ async function fillAtsxDateRange(block, record, overwrite, used) {
     await sleep(120);
   }
 
-  if (!record.start) return { handled: true, filled: 0, failed: 1 };
+  if (!record.start && !hasStart) return { handled: true, filled: 0, failed: 1 };
   clickElement(wrapper);
   await sleep(180);
-  const startSelected = await chooseAtsxRangeMonth("left", record.start);
-  if (!startSelected) {
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    return { handled: true, filled: 0, failed: 1 };
+  let filled = 0;
+  if (overwrite || !hasStart) {
+    const startSelected = await chooseAtsxRangeMonth("left", record.start);
+    if (!startSelected) {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      return { handled: true, filled: 0, failed: 1 };
+    }
+    filled += 1;
   }
 
   if (wantsPresent && currentControl) {
     if (!checkboxIsChecked(currentControl)) clickElement(currentControl);
     await sleep(140);
-    return { handled: true, filled: 2, failed: 0 };
+    return { handled: true, filled: filled + 1, failed: 0 };
   }
-  if (!record.end) return { handled: true, filled: 1, failed: 1 };
+  if (!record.end) return { handled: true, filled, failed: 1 };
+  if (!overwrite && hasEnd) return { handled: true, filled, failed: 0 };
 
   const endSelected = await chooseAtsxRangeMonth("right", record.end);
   if (!endSelected) {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    return { handled: true, filled: 1, failed: 1 };
+    return { handled: true, filled, failed: 1 };
   }
-  return { handled: true, filled: 2, failed: 0 };
+  return { handled: true, filled: filled + 1, failed: 0 };
 }
 
 async function chooseAntDate(element, value) {
@@ -1126,7 +1138,7 @@ async function chooseAntDate(element, value) {
 }
 
 function selectWrapperFor(element) {
-  const libraryWrapper = element.closest(".phoenix-select,.ant-select,.el-select,.ivu-select,[role=combobox]");
+  const libraryWrapper = element.closest(".phoenix-select,.ant-select,.atsx-select,.el-select,.ivu-select,[role=combobox]");
   if (libraryWrapper) return libraryWrapper;
   const genericWrapper = element.closest("[class*='select'],[class*='Select'],[class*='picker'],[class*='Picker']");
   if (!genericWrapper || controls(genericWrapper).length > 2) return null;
@@ -1150,6 +1162,7 @@ function optionRoot(option) {
     "[role=listbox]",
     ".phoenix-select-dropdown",
     ".ant-select-dropdown",
+    ".atsx-select-dropdown",
     ".el-select-dropdown",
     ".ivu-select-dropdown",
     "[class*='dropdown']",
@@ -1184,6 +1197,7 @@ function optionCandidates(target) {
   const selectors = [
     "[role=option]",
     ".ant-select-item-option",
+    ".atsx-select-dropdown-menu-item",
     ".el-select-dropdown__item",
     ".ivu-select-item",
     "[class*='Select-common-item']",
@@ -1429,6 +1443,7 @@ function controlCurrentValue(element) {
       ".phoenix-select-selection__choice__content",
       ".ant-select-selection-selected-value",
       ".ant-select-selection-item",
+      ".atsx-select-selection-selected-value",
       "[class*='Input-display-value']",
       ".el-select__selected-item",
       ".el-select__tags .el-tag",
@@ -1443,7 +1458,11 @@ function controlCurrentValue(element) {
     ).trim();
     if (displayValue) return displayValue;
     // 明确处于占位态：存在占位元素说明确实未选择
-    if (wrapper.querySelector(".ant-select-selection-placeholder,.phoenix-select-selection-placeholder")) return "";
+    if (wrapper.querySelector([
+      ".ant-select-selection-placeholder",
+      ".phoenix-select-selection-placeholder",
+      ".atsx-select-selection__placeholder"
+    ].join(","))) return "";
     // 组件内部输入框可能承载已选文案（部分 combobox 实现）
     const innerValue = String(wrapper.querySelector("input:not([type=hidden])")?.value || "").trim();
     if (innerValue) return innerValue;
@@ -1978,6 +1997,31 @@ async function fillDateRange(block, record, overwrite, used) {
   return filled;
 }
 
+function normalizedEducationChoice(key, value) {
+  const source = String(value ?? "").trim();
+  if (!source) return source;
+  if (key === "level") {
+    if (/博士|phd|doctor/i.test(source)) return "博士";
+    if (/硕士|研究生|master/i.test(source)) return "硕士";
+    if (/本科|学士|bachelor/i.test(source)) return "本科";
+    if (/大专|专科|associate/i.test(source)) return "大专";
+    if (/高中|highschool/i.test(source)) return "高中";
+    if (/初中/.test(source)) return "初中";
+    if (/小学/.test(source)) return "小学";
+  }
+  if (key === "type") {
+    if (/海外|港澳台|留学/.test(source)) return "海外及港澳台";
+    if (/非全日制/.test(source)) return "统招非全日制";
+    if (/全日制/.test(source)) return "统招全日制";
+    if (/自考/.test(source)) return "自考";
+  }
+  if (key === "rank") {
+    const percentile = source.match(/(?:前|top)?\s*(5|10|20|30|50)\s*%/i)?.[1];
+    if (percentile) return `前 ${percentile}%`;
+  }
+  return source;
+}
+
 async function fillRecord(block, definition, record, overwrite) {
   const used = new Set();
   let layout = { filled: 0, notes: [], diagnostics: [] };
@@ -1991,7 +2035,9 @@ async function fillRecord(block, definition, record, overwrite) {
   let failed = layout.failed || 0;
   for (const [key, aliases] of Object.entries(definition.fields)) {
     if (layout.handledKeys?.has(key)) continue;
-    const value = record[key];
+    const value = definition.type === "education"
+      ? normalizedEducationChoice(key, record[key])
+      : record[key];
     if (value == null || String(value).trim() === "") continue;
     const control = findControlByAliases(block, aliases, used, key) ||
       fallbackControlByKey(block, definition, key, used);
