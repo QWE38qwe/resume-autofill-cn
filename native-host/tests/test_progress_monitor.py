@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from job_email_assistant.feishu import BaseRecord
+from job_email_assistant.feishu import BaseRecord, normalize_company
 from job_email_assistant.progress_monitor import (
     AuthStore,
     CHANNELS,
@@ -10,6 +10,7 @@ from job_email_assistant.progress_monitor import (
     _xiaomi_job_progress,
     check_channel,
     enabled_channels,
+    list_enabled_channel_statuses,
     record_visible_status,
     run_monitor,
     save_chrome_cookies,
@@ -44,7 +45,9 @@ class FakeFeishu:
         return [
             record
             for record in records
-            if record.fields.get("公司") == company and not record.fields.get("父记录")
+            if normalize_company(str(record.fields.get("公司") or ""))
+            == normalize_company(company)
+            and not record.fields.get("父记录")
         ]
 
     def update_record_fields(self, record, fields):
@@ -70,6 +73,56 @@ def test_enabled_channels_includes_kuaishou_recruitment_parent():
     kuaishou = next(channel for channel in CHANNELS if channel.channel_id == "kuaishou")
     assert kuaishou in channels
     assert kuaishou.applications_url.endswith("#/campus/my-apply")
+
+
+def test_list_enabled_channels_refreshes_catalog_without_running_browser():
+    feishu = FakeFeishu()
+    feishu.records = [
+        BaseRecord(
+            "kuaishou-parent",
+            {"公司": "快手招聘", "是否巡检": ["是"], "Cookie状态": ["未配置"]},
+        ),
+        BaseRecord(
+            "nio-parent",
+            {"公司": "蔚来", "是否巡检": "是", "Cookie状态": ["生效中"]},
+        ),
+    ]
+    auth_store = SimpleNamespace(exists=lambda channel_id: channel_id == "nio_feishu")
+
+    result = list_enabled_channel_statuses(feishu, auth_store)
+
+    assert result["ok"] is True
+    assert [
+        (channel["channel_id"], channel["status"])
+        for channel in result["channels"]
+    ] == [
+        ("nio_feishu", "生效中"),
+        ("kuaishou", "未配置"),
+    ]
+    assert feishu.updates == []
+
+
+def test_list_enabled_channels_keeps_unsupported_company_visible():
+    feishu = FakeFeishu()
+    feishu.records = [
+        BaseRecord("dji-parent", {"公司": "大疆", "是否巡检": ["是"]}),
+    ]
+
+    result = list_enabled_channel_statuses(
+        feishu,
+        SimpleNamespace(exists=lambda _: False),
+    )
+
+    assert result["channels"] == [{
+        "channel_id": "base_dji-parent",
+        "name": "大疆",
+        "company": "大疆",
+        "status": "暂不支持",
+        "detail": "已同步巡检开关，当前版本暂无自动巡检适配",
+        "job_progress": [],
+        "applicationUrl": "",
+        "supported": False,
+    }]
 
 
 def test_monitor_writes_cookie_status_to_matching_parent(monkeypatch):

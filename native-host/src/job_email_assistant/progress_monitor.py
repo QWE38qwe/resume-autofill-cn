@@ -770,17 +770,98 @@ def _link_from_record(record: Any, field_name: str) -> str:
     return str(value or "") if isinstance(value, str) else ""
 
 
-def enabled_channels(feishu: FeishuBaseClient, records: list[Any]) -> list[Channel]:
-    enabled_companies = {
-        normalize_company(str(record.fields.get(feishu.settings.feishu_company_field) or ""))
+def _enabled_parent_records(
+    feishu: FeishuBaseClient, records: list[Any]
+) -> list[Any]:
+    return [
+        record
         for record in records
         if not has_link_value(record.fields.get(feishu.settings.feishu_parent_field))
         and _monitor_enabled(record.fields.get(feishu.settings.feishu_monitor_enabled_field))
+    ]
+
+
+def enabled_channels(feishu: FeishuBaseClient, records: list[Any]) -> list[Channel]:
+    enabled_companies = {
+        normalize_company(
+            _field_text(record.fields.get(feishu.settings.feishu_company_field))
+        )
+        for record in _enabled_parent_records(feishu, records)
     }
     return [
         channel for channel in CHANNELS
         if normalize_company(channel.company) in enabled_companies
     ]
+
+
+def _unsupported_enabled_channel_data(
+    feishu: FeishuBaseClient, records: list[Any]
+) -> list[dict[str, Any]]:
+    supported_companies = {
+        normalize_company(channel.company)
+        for channel in CHANNELS
+    }
+    result = []
+    for record in _enabled_parent_records(feishu, records):
+        company = _field_text(
+            record.fields.get(feishu.settings.feishu_company_field)
+        ).strip()
+        if not company or normalize_company(company) in supported_companies:
+            continue
+        result.append({
+            **ChannelStatus(
+                f"base_{record.record_id}",
+                company,
+                company,
+                "暂不支持",
+                "已同步巡检开关，当前版本暂无自动巡检适配",
+            ).to_dict(),
+            "applicationUrl": "",
+            "supported": False,
+        })
+    return result
+
+
+def list_enabled_channel_statuses(
+    feishu: FeishuBaseClient,
+    auth_store: AuthStore | None = None,
+) -> dict[str, Any]:
+    records = feishu.list_records()
+    channels = enabled_channels(feishu, records)
+    store = auth_store or AuthStore(TRACKER_ROOT / "state" / "auth")
+    channel_data = []
+    for channel in channels:
+        parents = feishu.find_company_parents(channel.company, records)
+        stored_status = ""
+        if parents:
+            stored_status = _field_text(
+                parents[0].fields.get(feishu.settings.feishu_cookie_status_field)
+            ).strip()
+        if channel.channel_id in CHROME_ONLY_CHANNEL_IDS:
+            status = stored_status or "需在Chrome核对"
+            detail = "需在已登录的 Chrome 标签页核对"
+        elif not store.exists(channel.channel_id):
+            status = "未配置"
+            detail = "已开启巡检，尚未保存登录态"
+        else:
+            status = stored_status or "待读取"
+            detail = "已同步飞书巡检配置"
+        channel_data.append({
+            **ChannelStatus(
+                channel.channel_id,
+                channel.name,
+                channel.company,
+                status,
+                detail,
+            ).to_dict(),
+            "applicationUrl": channel.applications_url,
+            "supported": True,
+        })
+    channel_data.extend(_unsupported_enabled_channel_data(feishu, records))
+    return {
+        "ok": True,
+        "channels": channel_data,
+    }
 
 
 def run_monitor(feishu: FeishuBaseClient, channel_id: str | None = None) -> dict[str, Any]:
@@ -824,7 +905,10 @@ def run_monitor(feishu: FeishuBaseClient, channel_id: str | None = None) -> dict
         channel_data.append({
             **status.to_dict(),
             "applicationUrl": channel.applications_url,
+            "supported": True,
         })
+    if not channel_id:
+        channel_data.extend(_unsupported_enabled_channel_data(feishu, records))
     return {
         "ok": True,
         "updated": updated,

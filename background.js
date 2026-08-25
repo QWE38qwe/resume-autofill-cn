@@ -167,6 +167,125 @@ function parseJsonContent(content) {
   return JSON.parse(source.slice(start, end + 1));
 }
 
+const COMPANY_HOST_RULES = [
+  [/^campus\.58\.com$/, "58同城"],
+  [/^nio\.jobs\.feishu\.cn$/, "蔚来"],
+  [/^anker-in\.jobs\.feishu\.cn$/, "安克创新"],
+  [/^transsion\.zhiye\.com$/, "传音控股"],
+  [/^talent\.lenovo\.com\.cn$/, "联想"],
+  [/^campushr\.hikvision\.com$/, "海康威视"],
+  [/^jobs\.bytedance\.com$/, "字节跳动"],
+  [/^xiaomi\.jobs\.f\.mioffice\.cn$/, "小米"],
+  [/^campus\.shokz\.com\.cn$/, "韶音科技"],
+  [/^campus\.jd\.com$/, "京东"],
+  [/^careers\.pddglobalhr\.com$/, "拼多多"],
+  [/^careers\.oppo\.com$/, "OPPO"],
+  [/^iflytek\.zhiye\.com$/, "科大讯飞"],
+  [/^campus\.kuaishou\.cn$/, "快手"]
+];
+
+const COMPANY_URL_RULES = [
+  [/^https?:\/\/app\.mokahr\.com\/campus-recruitment\/sina(?:\/|$)/i, "新浪"]
+];
+
+function normalizedHostname(value) {
+  try {
+    const source = String(value || "").trim().toLowerCase();
+    if (!source) return "";
+    if (!source.includes("://")) return source.replace(/^www\./, "").split("/")[0];
+    return new URL(source).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function knownCompanyForPage(hostname, url = "") {
+  const host = normalizedHostname(hostname);
+  return COMPANY_HOST_RULES.find(([pattern]) => pattern.test(host))?.[1]
+    || COMPANY_URL_RULES.find(([pattern]) => pattern.test(String(url || "")))?.[1]
+    || "";
+}
+
+function validResolvedCompany(value) {
+  const company = String(value || "").trim();
+  if (!company || company.length > 40) return false;
+  if (/^(campus|app|jobs?|talent|career|careers|campushr|recruit|招聘|校园招聘)$/i.test(company)) {
+    return false;
+  }
+  return /[\u3400-\u9fff]/.test(company) || /^(OPPO|vivo|DJI|BCG|BMW|TCL)$/i.test(company);
+}
+
+async function resolveCompanyNames(message) {
+  const records = (Array.isArray(message.records) ? message.records : [])
+    .slice(0, 30)
+    .map((record, index) => ({
+      id: String(record?.id ?? index),
+      hostname: normalizedHostname(record?.hostname || record?.url),
+      url: String(record?.url || "").trim(),
+      title: String(record?.title || "").trim().slice(0, 160)
+    }));
+  if (!records.length) return { ok: true, resolutions: [] };
+
+  const { settings = {}, companyNameMappings = {} } =
+    await chrome.storage.local.get(["settings", "companyNameMappings"]);
+  const resolutions = [];
+  const unresolved = [];
+  records.forEach(record => {
+    const known = knownCompanyForPage(record.hostname, record.url);
+    const cacheKey = `${record.hostname}|${record.title}`;
+    const cached = String(companyNameMappings[cacheKey] || "");
+    if (known) resolutions.push({ id: record.id, company: known, source: "domain" });
+    else if (validResolvedCompany(cached)) {
+      resolutions.push({ id: record.id, company: cached, source: "cache" });
+    } else {
+      unresolved.push({ ...record, cacheKey });
+    }
+  });
+
+  if (unresolved.length && activeAiProviders(settings).length) {
+    const prompt = `识别招聘网页对应的中国公司品牌。根据 hostname 和页面标题输出用户熟悉的中文简称，例如 campus.58.com 应为“58同城”，nio.jobs.feishu.cn 应为“蔚来”。禁止输出 campus、app、talent、jobs、career 等站点路径词；无法可靠判断时 company 必须为 null。
+
+只返回 JSON：
+{"resolutions":[{"id":"输入 id","company":"中文公司简称或 null","confidence":0.0}]}
+
+输入：
+${JSON.stringify(unresolved.map(({ id, hostname, title }) => ({ id, hostname, title })))}`;
+    try {
+      const { payload, provider } = await withAiFallback(settings, {
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: "你是招聘网站公司识别器。只根据公开网页域名和标题识别雇主品牌，不推测用户信息。" },
+          { role: "user", content: prompt }
+        ]
+      });
+      const parsed = parseJsonContent(payload.choices?.[0]?.message?.content);
+      const byId = new Map(unresolved.map(record => [record.id, record]));
+      (Array.isArray(parsed.resolutions) ? parsed.resolutions : []).forEach(item => {
+        const source = byId.get(String(item?.id));
+        const company = String(item?.company || "").trim();
+        if (!source || Number(item?.confidence || 0) < .72 || !validResolvedCompany(company)) return;
+        resolutions.push({
+          id: source.id,
+          company,
+          source: provider.name || provider.model || "ai"
+        });
+        companyNameMappings[source.cacheKey] = company;
+      });
+      const entries = Object.entries(companyNameMappings);
+      await chrome.storage.local.set({
+        companyNameMappings: entries.length > 100
+          ? Object.fromEntries(entries.slice(-100))
+          : companyNameMappings
+      });
+    } catch {
+      // 公司名识别失败不应阻断填写记录保存；管理页保留“公司待确认”。
+    }
+  }
+
+  return { ok: true, resolutions };
+}
+
 async function aiMatchFields(message) {
   const { settings = {}, aiFieldMappings = {} } = await chrome.storage.local.get(["settings", "aiFieldMappings"]);
   if (!activeAiProviders(settings).length) return { error: "未配置启用的 AI 模型版本" };
@@ -457,6 +576,23 @@ async function monitorProgress(channelId = "") {
     await chrome.storage.local.set({ progressMonitorStatus: status });
     throw error;
   }
+}
+
+async function syncProgressChannels() {
+  const { mailSettings = {}, settings = {}, progressMonitorStatus = {} } =
+    await chrome.storage.local.get(["mailSettings", "settings", "progressMonitorStatus"]);
+  const response = await sendNativeMessage({
+    ...mailPayload(mailSettings, settings),
+    action: "listProgressChannels"
+  });
+  if (!response.ok) throw new Error(response.error || "读取巡检渠道失败");
+  const status = {
+    ...progressMonitorStatus,
+    channels: response.channels || [],
+    catalogRefreshedAt: new Date().toISOString()
+  };
+  await chrome.storage.local.set({ progressMonitorStatus: status });
+  return { ok: true, ...status };
 }
 
 // 定位当前渠道已登录的投递页标签：优先用“Chrome 登录”记录的标签，
@@ -758,6 +894,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendNativeMessage({ action: "localConfig" })
       .then(sendResponse)
       .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message.type === "RESOLVE_COMPANIES") {
+    resolveCompanyNames(message)
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message.type === "PROGRESS_CHANNELS") {
+    syncProgressChannels().then(sendResponse).catch(error => sendResponse({
+      ok: false,
+      error: error.message || "读取巡检渠道失败"
+    }));
     return true;
   }
   if (message.type === "PROGRESS_MONITOR") {

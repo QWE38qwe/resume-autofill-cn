@@ -1,6 +1,6 @@
 [project]
 name = "jianfill-mail-host"
-version = "0.4.1"
+version = "0.4.2"
 description = "Native Messaging host for Jianfill recruitment email tasks."
 requires-python = ">=3.11"
 dependencies = [

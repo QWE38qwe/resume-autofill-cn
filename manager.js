@@ -169,11 +169,13 @@ let db = {};
 let modalCtx = null;
 let openedVersionId = null;
 let parsedDraft = null;
+let progressCatalogPromise = null;
 
 function activateTab(tab) {
   $$("#nav button").forEach(button => button.classList.toggle("active", button.dataset.tab === tab));
   $$(".section").forEach(section => section.classList.toggle("active", section.id === tab));
   window.scrollTo({ top: 0, behavior: "smooth" });
+  if (tab === "progress") refreshProgressChannelCatalog().catch(() => {});
 }
 
 $$("#nav button").forEach(button => {
@@ -243,6 +245,7 @@ async function init() {
   }
   renderAiProviders();
   renderAiRules();
+  refreshHistoryCompanyNames().catch(() => {});
 
   const requestedTab = location.hash.replace(/^#/, "");
   if (requestedTab && document.getElementById(requestedTab)) activateTab(requestedTab);
@@ -886,8 +889,20 @@ $("#saveHobbies").addEventListener("click", async () => {
   alert("兴趣爱好已保存");
 });
 
+function isGeneratedCompanyName(value) {
+  const company = String(value || "").trim();
+  if (!company) return true;
+  if (/^(OPPO|vivo|DJI|BCG|BMW|TCL)$/i.test(company)) return false;
+  return !/[\u3400-\u9fff]/.test(company);
+}
+
+function historyCompanyName(record) {
+  return isGeneratedCompanyName(record.company) ? "公司待确认" : String(record.company).trim();
+}
+
 function historyCompanyKey(record) {
-  return String(record.company || record.site || "").trim().toLocaleLowerCase("zh-CN");
+  const company = isGeneratedCompanyName(record.company) ? "" : record.company;
+  return String(company || record.site || "").trim().toLocaleLowerCase("zh-CN");
 }
 
 function historyTimestamp(record) {
@@ -920,9 +935,39 @@ async function upsertHistory(record) {
   await chrome.storage.local.set({ fillHistory: db.fillHistory });
 }
 
+async function refreshHistoryCompanyNames() {
+  const pending = db.fillHistory
+    .map((record, index) => ({ record, index }))
+    .filter(({ record }) => isGeneratedCompanyName(record.company))
+    .map(({ record, index }) => ({
+      id: String(index),
+      hostname: record.site || record.url || "",
+      url: record.url || "",
+      title: record.pageTitle || ""
+    }));
+  if (!pending.length) return;
+  const result = await chrome.runtime.sendMessage({
+    type: "RESOLVE_COMPANIES",
+    records: pending
+  });
+  if (!result?.ok) return;
+  let changed = false;
+  (result.resolutions || []).forEach(item => {
+    const index = Number(item.id);
+    if (!Number.isInteger(index) || !db.fillHistory[index] || !item.company) return;
+    db.fillHistory[index].company = item.company;
+    changed = true;
+  });
+  if (!changed) return;
+  db.fillHistory = dedupeLatestHistory(db.fillHistory);
+  await chrome.storage.local.set({ fillHistory: db.fillHistory });
+  renderHistoryFilters();
+  renderHistory();
+}
+
 function renderHistoryFilters() {
   const current = $("#companyFilter").value;
-  const companies = [...new Set(db.fillHistory.map(record => record.company || record.site).filter(Boolean))]
+  const companies = [...new Set(db.fillHistory.map(historyCompanyName).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right, "zh-CN"));
   $("#companyFilter").innerHTML = '<option value="">全部公司</option>' +
     companies.map(company => `<option value="${safe(company)}">${safe(company)}</option>`).join("");
@@ -952,11 +997,6 @@ function dateKey(value) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
-}
-
-function statusTag(status) {
-  const value = status || "未完成";
-  return `<span class="field-chip ${value === "已完成" ? "matched" : "unmatched"}">${safe(value)}</span>`;
 }
 
 function historyVersion(record) {
@@ -990,7 +1030,7 @@ function filteredHistory() {
   return db.fillHistory
     .map((record, index) => ({ record, index }))
     .filter(({ record }) => {
-      const companyName = record.company || record.site || "";
+      const companyName = historyCompanyName(record);
       const day = dateKey(record.time);
       return (!company || companyName === company) &&
         (!status || (record.status || "未完成") === status) &&
@@ -1034,13 +1074,12 @@ function renderHistory() {
         <tbody>
           ${rows.map(({ record, index }) => {
             const link = httpUrl(record.url);
-            const company = safe(record.company || record.site || "未命名公司");
+            const company = safe(historyCompanyName(record));
             return `
               <tr class="history-row">
                 <td>
                   <div class="company-cell">
                     <input class="history-company" data-company="${index}" value="${company}" aria-label="编辑公司名称">
-                    ${statusTag(record.status)}
                   </div>
                 </td>
                 <td>
@@ -1080,7 +1119,7 @@ function renderHistory() {
 function bindHistory() {
   $$("[data-company]").forEach(input => {
     const index = Number(input.dataset.company);
-    const original = db.fillHistory[index].company || db.fillHistory[index].site || "";
+    const original = historyCompanyName(db.fillHistory[index]);
     input.onkeydown = event => {
       if (event.key === "Enter") input.blur();
       if (event.key === "Escape") {
@@ -1395,6 +1434,8 @@ function progressStatusClass(status) {
     "已过期": "expired",
     "读取失败": "failed",
     "需在Chrome核对": "unconfigured",
+    "待读取": "unconfigured",
+    "暂不支持": "unsupported",
     "未配置": "unconfigured"
   }[status] || "unconfigured";
 }
@@ -1403,6 +1444,21 @@ function updateProgressBridge(state, text) {
   const node = $("#progressBridgeStatus");
   node.className = `bridge-state ${state}`;
   node.innerHTML = `<i></i>${safe(text)}`;
+}
+
+async function refreshProgressChannelCatalog() {
+  if (progressCatalogPromise) return progressCatalogPromise;
+  progressCatalogPromise = chrome.runtime.sendMessage({ type: "PROGRESS_CHANNELS" })
+    .then(result => {
+      if (!result?.ok) throw new Error(result?.error || "读取巡检渠道失败");
+      db.progressMonitorStatus = result;
+      renderProgressMonitor();
+      return result;
+    })
+    .finally(() => {
+      progressCatalogPromise = null;
+    });
+  return progressCatalogPromise;
 }
 
 function renderProgressMonitor() {
@@ -1437,7 +1493,9 @@ function renderProgressMonitor() {
           <td><span class="progress-state ${progressStatusClass(channel.status)}">${safe(channel.status)}</span></td>
           <td>${httpUrl(channel.applicationUrl) ? `<a class="mail-open" href="${safeAttr(httpUrl(channel.applicationUrl))}" target="_blank" rel="noopener">打开投递 ↗</a>` : '<span class="cell-empty">—</span>'}</td>
           <td>${monitor.finishedAt ? safe(formatMailTime(monitor.finishedAt)) : '<span class="cell-empty">—</span>'}</td>
-          <td class="progress-actions"><button class="icon-button progress-check" title="仅巡检此公司" data-channel-id="${safeAttr(channel.channel_id)}" ${monitor.runningChannelId === channel.channel_id ? "disabled" : ""}>↻</button><button class="btn ghost progress-chrome-login" data-channel-id="${safeAttr(channel.channel_id)}">① 登录</button><button class="btn primary progress-save-verify" data-channel-id="${safeAttr(channel.channel_id)}">② 连接并验证</button></td>
+          <td class="progress-actions">${channel.supported === false
+            ? '<span class="muted">等待适配</span>'
+            : `<button class="icon-button progress-check" title="仅巡检此公司" data-channel-id="${safeAttr(channel.channel_id)}" ${monitor.runningChannelId === channel.channel_id ? "disabled" : ""}>↻</button><button class="btn ghost progress-chrome-login" data-channel-id="${safeAttr(channel.channel_id)}">① 登录</button><button class="btn primary progress-save-verify" data-channel-id="${safeAttr(channel.channel_id)}">② 连接并验证</button>`}</td>
         </tr>
       `).join("")}</tbody>
     </table></div>` : '<div class="empty">在飞书公司主记录中将“是否巡检”设为“是”，再点击“立即巡检”。</div>';
@@ -1514,24 +1572,22 @@ function renderMailDashboard() {
   $("#mailHistoryTable").innerHTML = `
     <div class="mail-table-wrap">
       <table class="mail-table">
-        <thead><tr><th>状态</th><th>邮件</th><th>分类</th><th>DDL</th><th>接收时间</th><th>操作</th></tr></thead>
+        <thead><tr><th>状态</th><th>公司</th><th>邮件标题</th><th>分类</th><th>DDL</th><th>接收时间</th><th>操作</th></tr></thead>
         <tbody>
           ${rows.map(item => {
             const link = httpUrl(item.assessmentUrl);
             return `
               <tr>
                 <td><span class="field-chip ${mailStatusClass(item.status)}">${safe(item.status || "未知")}</span></td>
-                <td>
-                  <div class="mail-subject" title="${safeAttr(item.subject || "")}">${safe(item.subject || "无主题")}</div>
-                  <small>${safe(item.company || item.reason || "未识别公司")}</small>
-                </td>
+                <td><div class="mail-company" title="${safeAttr(item.company || item.reason || "未识别公司")}">${safe(item.company || item.reason || "未识别公司")}</div></td>
+                <td><div class="mail-subject" title="${safeAttr(item.subject || "")}">${safe(item.subject || "无主题")}</div></td>
                 <td>${item.category ? `<span class="mail-category">${safe(item.category)}</span>` : '<span class="cell-empty">—</span>'}</td>
                 <td>${item.deadline ? `<time>${safe(item.deadline)}</time>` : '<span class="cell-empty">—</span>'}</td>
-                <td>
-                  <time>${safe(formatMailTime(item.receivedAt))}</time>
-                  ${link ? `<a class="mail-open" href="${safeAttr(link)}" target="_blank" rel="noopener">打开 ↗</a>` : ""}
-                </td>
-                <td><select class="mail-action" data-message-id="${safeAttr(item.messageId)}" aria-label="修改邮件状态"><option value="">修改状态</option><option value="completed">已完成</option><option value="ignored">已忽略</option><option value="confirm_write">确认写入</option></select></td>
+                <td><time>${safe(formatMailTime(item.receivedAt))}</time></td>
+                <td><div class="mail-actions">
+                  ${link ? `<a class="mail-open" href="${safeAttr(link)}" target="_blank" rel="noopener">打开链接 ↗</a>` : ""}
+                  <select class="mail-action" data-message-id="${safeAttr(item.messageId)}" aria-label="修改邮件状态"><option value="">修改状态</option><option value="completed">已完成</option><option value="ignored">已忽略</option><option value="confirm_write">确认写入</option></select>
+                </div></td>
               </tr>
             `;
           }).join("")}

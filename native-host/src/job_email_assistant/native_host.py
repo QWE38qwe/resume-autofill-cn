@@ -13,6 +13,7 @@ from . import __version__
 from .config import Settings
 from .feishu import FeishuBaseClient
 from .progress_monitor import (
+    list_enabled_channel_statuses,
     record_visible_status,
     run_monitor,
     save_chrome_cookies,
@@ -153,6 +154,13 @@ def handle(message: dict[str, Any]) -> dict[str, Any]:
         feishu = FeishuBaseClient(settings)
         try:
             return run_monitor(feishu, str(message.get("channelId") or "") or None)
+        finally:
+            feishu.close()
+    if action == "listProgressChannels":
+        settings = Settings.from_payload(message, STATE_DB)
+        feishu = FeishuBaseClient(settings)
+        try:
+            return list_enabled_channel_statuses(feishu)
         finally:
             feishu.close()
     if action == "startProgressLogin":

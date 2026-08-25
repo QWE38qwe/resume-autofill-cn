@@ -135,6 +135,23 @@ function showHistory(history) {
   show(rows);
 }
 
+async function resolveCompany(tab, hostname) {
+  try {
+    const result = await chrome.runtime.sendMessage({
+      type: "RESOLVE_COMPANIES",
+      records: [{
+        id: "current",
+        hostname,
+        url: tab?.url || "",
+        title: tab?.title || ""
+      }]
+    });
+    return result?.resolutions?.find(item => item.id === "current")?.company || "";
+  } catch {
+    return "";
+  }
+}
+
 $("#scan").onclick = scan;
 async function runFill(mode, button) {
   const buttons = [$("#fill"), $("#supplement")];
@@ -153,11 +170,12 @@ async function runFill(mode, button) {
       const unmatched = items.filter(item => /未匹配|未找到|待适配/.test((item.status || "") + item.label)).map(item => item.label);
       const skipped = items.filter(item => /跳过/.test(item.status || "")).map(item => item.label);
       const site = pageHost(tab.url);
-      const company = site.split(".")[0];
+      const company = await resolveCompany(tab, site);
       const record = {
         company,
         site,
         url: tab.url,
+        pageTitle: tab.title || "",
         time: new Date().toLocaleString(),
         status: unmatched.length ? "未完成" : "已完成",
         note: "",
