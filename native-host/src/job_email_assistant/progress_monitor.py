@@ -180,6 +180,22 @@ CHANNELS = (
         ),
         ("text=暂无投递记录", "text=暂无应聘记录", '[class*="empty"]'),
     ),
+    Channel(
+        "kuaishou",
+        "快手",
+        "快手",
+        "https://campus.kuaishou.cn/recruit/campus/e/#/campus/my-apply",
+        ("/campus/login", "/login"),
+        (
+            "text=投递记录",
+            "text=简历投递",
+            "text=笔试",
+            "text=面试",
+            '[class*="apply-list"]',
+            '[class*="application"] [class*="item"]',
+        ),
+        ("text=暂无记录", "text=暂无投递记录", '[class*="empty"]'),
+    ),
 )
 
 

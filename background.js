@@ -537,7 +537,8 @@ const progressChannelUrls = {
   jd: "https://campus.jd.com/#/myDeliver?type=present",
   pdd: "https://careers.pddglobalhr.com/campus/personal-center",
   oppo: "https://careers.oppo.com/university/oppo/center/history",
-  iflytek: "https://iflytek.zhiye.com/personal/deliveryRecord"
+  iflytek: "https://iflytek.zhiye.com/personal/deliveryRecord",
+  kuaishou: "https://campus.kuaishou.cn/recruit/campus/e/#/campus/my-apply"
 };
 
 async function openChromeProgressLogin(channelId) {
@@ -760,7 +761,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message.type === "PROGRESS_MONITOR") {
-    monitorProgress().then(sendResponse).catch(error => sendResponse({
+    monitorProgress(String(message.channelId || "")).then(sendResponse).catch(error => sendResponse({
       ok: false,
       error: error.message || "进展巡检失败"
     }));

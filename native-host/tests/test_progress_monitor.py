@@ -3,11 +3,13 @@ from types import SimpleNamespace
 from job_email_assistant.feishu import BaseRecord
 from job_email_assistant.progress_monitor import (
     AuthStore,
+    CHANNELS,
     CHROME_ONLY_CHANNEL_IDS,
     Channel,
     ChannelStatus,
     _xiaomi_job_progress,
     check_channel,
+    enabled_channels,
     record_visible_status,
     run_monitor,
     save_chrome_cookies,
@@ -51,6 +53,23 @@ class FakeFeishu:
     def create_record_fields(self, fields):
         self.creates.append(fields)
         return f"created-{len(self.creates)}"
+
+
+def test_enabled_channels_includes_kuaishou_recruitment_parent():
+    feishu = FakeFeishu()
+    records = [
+        BaseRecord("kuaishou-parent", {"公司": "快手招聘", "是否巡检": ["是"]}),
+        BaseRecord(
+            "kuaishou-child",
+            {"公司": "快手招聘", "是否巡检": ["是"], "父记录": ["kuaishou-parent"]},
+        ),
+    ]
+
+    channels = enabled_channels(feishu, records)
+
+    kuaishou = next(channel for channel in CHANNELS if channel.channel_id == "kuaishou")
+    assert kuaishou in channels
+    assert kuaishou.applications_url.endswith("#/campus/my-apply")
 
 
 def test_monitor_writes_cookie_status_to_matching_parent(monkeypatch):
