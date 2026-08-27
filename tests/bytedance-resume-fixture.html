@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>ByteDance resume fixture</title>
+  <style>
+    body { font: 16px sans-serif; }
+    section, .work-record { margin: 16px; padding: 16px; border: 1px solid #ccc; }
+    label { display: block; margin: 8px 0; }
+    input, textarea { padding: 6px; }
+    .throne-biz-date-range-picker-wrapper { display: flex; gap: 8px; }
+  </style>
+</head>
+<body>
+  <section>
+    <h2>基本信息</h2>
+    <label>姓名
+      <input class="ud__native-input" data-form-field-id="name"
+        data-form-field-name="name" data-form-field-i18n-name="姓名">
+    </label>
+    <label>手机号码
+      <input class="ud__native-input" data-form-field-id="mobile"
+        data-form-field-name="mobile" data-form-field-i18n-name="手机号码">
+    </label>
+    <label>邮箱
+      <input class="ud__native-input" data-form-field-id="email"
+        data-form-field-name="email" data-form-field-i18n-name="邮箱">
+    </label>
+  </section>
+
+  <section class="applyFormModuleWrapper-placeholder">
+    <div class="applyFormModuleWrapper-title">实习经历</div>
+    <p>请填写实习经历</p>
+    <label class="applyFormModuleWrapper-no-experience">
+      <input id="noExperience" type="checkbox" checked>没有实习经历
+    </label>
+    <div id="workRecords"></div>
+    <button id="addWork" type="button">添加</button>
+  </section>
+
+  <pre id="result">not-run</pre>
+
+  <script>
+    const fixtureStore = {
+      personal: {
+        name: "测试姓名",
+        phone: "测试手机号",
+        email: "测试邮箱"
+      },
+      education: [],
+      profiles: [{
+        id: "fixture-profile",
+        name: "测试简历",
+        work: [{
+          company: "甲公司",
+          position: "产品经理",
+          start: "2024-01",
+          end: "2024-06",
+          description: "负责产品规划"
+        }, {
+          company: "乙公司",
+          position: "产品实习生",
+          start: "2024-07",
+          end: "2025-02",
+          description: "负责需求分析"
+        }]
+      }],
+      activeProfileId: "fixture-profile",
+      projects: [],
+      languages: [],
+      skills: [],
+      awards: [],
+      papers: [],
+      certificates: [],
+      portfolio: [],
+      customFields: [],
+      settings: {}
+    };
+
+    window.chrome = {
+      storage: {
+        local: {
+          get: async keys => Object.fromEntries(keys.map(key => [key, fixtureStore[key]]))
+        }
+      },
+      runtime: {
+        sendMessage: async () => ({ matches: [], source: "disabled" }),
+        onMessage: { addListener: () => {} }
+      }
+    };
+
+    function createWorkRecord() {
+      const record = document.createElement("div");
+      record.className = "work-record";
+      record.innerHTML = `
+        <label>公司名称
+          <input class="ud__native-input" data-form-field-id="company"
+            data-form-field-name="company" data-form-field-i18n-name="公司名称">
+        </label>
+        <label>职位名称
+          <input class="ud__native-input" data-form-field-id="title"
+            data-form-field-name="title" data-form-field-i18n-name="职位名称">
+        </label>
+        <div class="ud-formily-item" data-form-field-id="start_end_time"
+          data-form-field-name="start_end_time" data-form-field-i18n-name="起止时间">
+          <label>起止时间</label>
+          <div class="throne-biz-date-range-picker-wrapper">
+            <div class="throne-biz-date-range-picker-input"><input class="ud__native-input"></div>
+            <div class="throne-biz-date-range-picker-input"><input class="ud__native-input"></div>
+          </div>
+        </div>
+        <label>描述
+          <textarea data-form-field-id="desc" data-form-field-name="desc"
+            data-form-field-i18n-name="描述"></textarea>
+        </label>`;
+      document.querySelector("#workRecords").append(record);
+    }
+
+    document.querySelector("#noExperience").addEventListener("change", event => {
+      if (!event.target.checked && !document.querySelector(".work-record")) createWorkRecord();
+    });
+    document.querySelector("#addWork").addEventListener("click", createWorkRecord);
+  </script>
+  <script src="../content.js"></script>
+  <script>
+    window.runFixture = async () => {
+      const result = await window.__jianfillTest.fillCurrentFrame("supplement");
+      const values = selector => [...document.querySelectorAll(selector)].map(input => input.value);
+      const output = {
+        name: document.querySelector("[data-form-field-id=name]").value,
+        phone: document.querySelector("[data-form-field-id=mobile]").value,
+        email: document.querySelector("[data-form-field-id=email]").value,
+        noExperience: document.querySelector("#noExperience").checked,
+        companies: values("[data-form-field-id=company]"),
+        positions: values("[data-form-field-id=title]"),
+        dates: [...document.querySelectorAll(".throne-biz-date-range-picker-wrapper")]
+          .map(wrapper => [...wrapper.querySelectorAll("input")].map(input => input.value)),
+        descriptions: values("[data-form-field-id=desc]"),
+        result
+      };
+      document.querySelector("#result").textContent = JSON.stringify(output, null, 2);
+      return output;
+    };
+  </script>
+</body>
+</html>

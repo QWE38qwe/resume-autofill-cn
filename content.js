@@ -353,6 +353,9 @@ function labelOf(element) {
     element.getAttribute("title"),
     element.getAttribute("data-field"),
     element.getAttribute("data-field-name"),
+    element.getAttribute("data-form-field-id"),
+    element.getAttribute("data-form-field-name"),
+    element.getAttribute("data-form-field-i18n-name"),
     element.getAttribute("data-label"),
     element.getAttribute("data-testid"),
     element.getAttribute("data-test-id"),
@@ -361,6 +364,16 @@ function labelOf(element) {
     element.getAttribute("formcontrolname"),
     id
   );
+  const formField = element.closest?.(
+    "[data-form-field-i18n-name],[data-form-field-name],[data-form-field-id]"
+  );
+  if (formField && formField !== element) {
+    pieces.push(
+      formField.getAttribute("data-form-field-i18n-name"),
+      formField.getAttribute("data-form-field-name"),
+      formField.getAttribute("data-form-field-id")
+    );
+  }
   const exactFormItem = element.closest([
     ".form-item",
     ".form-wrap",
@@ -1065,6 +1078,40 @@ async function fillAtsxDateRange(block, record, overwrite, used) {
   return { handled: true, filled: filled + 1, failed: 0 };
 }
 
+async function fillThroneDateRange(block, record, overwrite, used) {
+  const wrappers = queryAllDeep(block, ".throne-biz-date-range-picker-wrapper")
+    .filter(wrapper => {
+      const inputs = [...wrapper.querySelectorAll("input:not([type=hidden])")];
+      return inputs.length >= 2 && inputs.some(input => !used.has(input));
+    });
+  const wrapper = wrappers[0];
+  if (!wrapper) return { handled: false, filled: 0, failed: 0 };
+
+  const inputs = [...wrapper.querySelectorAll("input:not([type=hidden])")].slice(0, 2);
+  inputs.forEach(input => used.add(input));
+  const values = [record.start, record.end].map(value => {
+    const part = splitDate(value);
+    return part.year && part.month ? `${part.year}-${part.month}` : "";
+  });
+  let filled = 0;
+  let failed = 0;
+  for (let index = 0; index < inputs.length; index += 1) {
+    const input = inputs[index];
+    const target = values[index];
+    if (!target) {
+      if (index === 1 && recordWantsPresent(record)) continue;
+      if (!controlCurrentValue(input)) failed += 1;
+      continue;
+    }
+    if (!overwrite && !isBlankControl(input)) continue;
+    forceNativeValue(input, target);
+    await sleep(100);
+    if (String(input.value || "").includes(target)) filled += 1;
+    else failed += 1;
+  }
+  return { handled: true, filled, failed };
+}
+
 async function chooseAntDate(element, value) {
   const picker = element.closest?.(".ant-calendar-picker");
   if (!picker) return false;
@@ -1740,10 +1787,16 @@ async function fillWorkByLayout(block, record, overwrite, used) {
     }
   }
 
-  const atsxResult = await fillAtsxDateRange(block, record, overwrite, used);
-  let dateFailed = atsxResult.failed;
+  const throneResult = await fillThroneDateRange(block, record, overwrite, used);
+  const atsxResult = throneResult.handled
+    ? { handled: false, filled: 0, failed: 0 }
+    : await fillAtsxDateRange(block, record, overwrite, used);
+  let dateFailed = throneResult.failed + atsxResult.failed;
   let partsResult = { filled: 0, failed: 0, handled: false };
-  if (atsxResult.handled) {
+  if (throneResult.handled) {
+    filled += throneResult.filled;
+    notes.push("起止年月（字节范围组件）");
+  } else if (atsxResult.handled) {
     filled += atsxResult.filled;
     notes.push("起止年月（飞书范围组件）");
   } else {
@@ -1751,9 +1804,9 @@ async function fillWorkByLayout(block, record, overwrite, used) {
     filled += partsResult.filled;
     dateFailed += partsResult.failed;
   }
-  if (!atsxResult.handled && partsResult.handled) {
+  if (!throneResult.handled && !atsxResult.handled && partsResult.handled) {
     notes.push("起止年月");
-  } else if (!atsxResult.handled && !partsResult.handled) {
+  } else if (!throneResult.handled && !atsxResult.handled && !partsResult.handled) {
     if (startControl && record.start && (overwrite || isBlankControl(startControl))) {
       const selected = await choosePhoenixMonth(startControl, record.start);
       if (!selected) forceNativeValue(startControl, formatDateValue(startControl, record.start));
@@ -1819,6 +1872,9 @@ function recordAnchorControls(root, definition) {
       control.getAttribute("name"),
       control.getAttribute("data-field"),
       control.getAttribute("data-field-name"),
+      control.getAttribute("data-form-field-id"),
+      control.getAttribute("data-form-field-name"),
+      control.getAttribute("data-form-field-i18n-name"),
       control.getAttribute("data-label")
     ].filter(Boolean).join(" ");
     return bestAlias(explicit, definition.anchors);
@@ -1961,6 +2017,8 @@ async function fillYearMonthParts(block, record, overwrite, used) {
 async function fillDateRange(block, record, overwrite, used) {
   const startAliases = ["开始时间", "起始时间", "入学时间", "就读开始时间", "开始日期", "起止时间", "start date", "from"];
   const endAliases = ["结束时间", "毕业时间", "离职时间", "就读结束时间", "结束日期", "end date", "to"];
+  const throneResult = await fillThroneDateRange(block, record, overwrite, used);
+  if (throneResult.handled) return throneResult.filled;
   const atsxResult = await fillAtsxDateRange(block, record, overwrite, used);
   if (atsxResult.handled) return atsxResult.filled;
   const partsResult = await fillYearMonthParts(block, record, overwrite, used);
@@ -2056,11 +2114,30 @@ async function fillRecord(block, definition, record, overwrite) {
 
 function sectionForDefinition(definition) {
   if (definition.type !== "work") return findSection(definition.titles, definition);
-  return findSection(["实习经历", "实习经验"], definition) ||
+  return byteDanceInternshipSection() ||
+    findSection(["实习经历", "实习经验"], definition) ||
     findSection(["工作经历", "工作经验", "任职经历"], definition) ||
     workInfoSection() ||
     findSection(["work experience", "employment history", "experience"], definition) ||
     findSection(definition.titles, definition);
+}
+
+function byteDanceInternshipSection() {
+  const title = queryAllDeep(document, ".applyFormModuleWrapper-title")
+    .find(element => normalizeText(element.textContent) === "实习经历");
+  return title?.closest?.("[class*='applyFormModuleWrapper-placeholder']") || null;
+}
+
+async function prepareByteDanceInternshipSection(records) {
+  if (!records.length) return;
+  const section = byteDanceInternshipSection();
+  const noExperience = section?.querySelector(
+    ".applyFormModuleWrapper-no-experience input[type=checkbox]"
+  );
+  if (noExperience?.checked) {
+    clickElement(noExperience);
+    await sleep(360);
+  }
 }
 
 async function fillRepeatedSections(store, profile, overwrite) {
@@ -2069,6 +2146,9 @@ async function fillRepeatedSections(store, profile, overwrite) {
   for (const definition of REPEAT_DEFS) {
     const records = definition.type === "work" ? (profile?.work || []) : (store[definition.type] || []);
     if (!records.length) continue;
+    if (definition.type === "work") {
+      await prepareByteDanceInternshipSection(records);
+    }
     const root = sectionForDefinition(definition);
     if (!root) continue;
     const blocks = await ensureRecordBlocks(root, definition, records.length);
