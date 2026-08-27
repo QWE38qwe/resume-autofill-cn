@@ -196,14 +196,46 @@ CHANNELS = (
         ),
         ("text=暂无记录", "text=暂无投递记录", '[class*="empty"]'),
     ),
+    Channel(
+        "dji",
+        "大疆",
+        "大疆",
+        "https://apply.careers.dji.com/candidate/applications/deliver-query/dji",
+        (),
+        (
+            "text=申请记录",
+            "text=投递时间",
+            '[class*="applicationListItem"]',
+            '[class*="recordCard"]',
+        ),
+        (
+            "text=暂无投递记录",
+            "text=没有投递记录",
+            '[class*="noApplications"]',
+            '[class*="emptyBlock"]',
+        ),
+    ),
+    Channel(
+        "vivo",
+        "vivo",
+        "vivo",
+        "https://hr-campus.vivo.com/personal/deliveryRecord",
+        ("/login",),
+        (
+            "text=投递记录",
+            "text=已投递",
+            ".delivery-list-job_name",
+            '[class*="delivery-record"]',
+        ),
+        ("text=暂无投递记录", "text=暂无数据", "text=去投递"),
+    ),
 )
 
 
-# 这些渠道在无头浏览器里无法可靠还原登录态：百度即使 Cookie 齐全也会被反爬拦到
-# about:blank 空白页；OPPO 的登录 token 不在可导出的 Cookie / localStorage 中，
-# 还原后必然跳登录页误判“已过期”。它们改由扩展读取用户已登录的 Chrome 标签页，
-# 无头巡检时跳过，避免把状态误写成“已过期 / 空白页”。
-CHROME_ONLY_CHANNEL_IDS = frozenset({"baidu", "oppo"})
+# 这些渠道无法可靠在无头浏览器中巡检：百度受反爬拦截，OPPO 登录 token
+# 不可导出，大疆则要求每次通过手机号验证码查询。它们改由扩展读取用户当前
+# Chrome 标签页，避免误判登录状态。
+CHROME_ONLY_CHANNEL_IDS = frozenset({"baidu", "oppo", "dji"})
 
 
 class AuthStore:

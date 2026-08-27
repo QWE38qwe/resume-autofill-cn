@@ -102,10 +102,24 @@ def test_list_enabled_channels_refreshes_catalog_without_running_browser():
     assert feishu.updates == []
 
 
+def test_enabled_channels_include_dji_and_vivo():
+    feishu = FakeFeishu()
+    records = [
+        BaseRecord("dji-parent", {"公司": "大疆", "是否巡检": ["是"]}),
+        BaseRecord("vivo-parent", {"公司": "vivo", "是否巡检": ["是"]}),
+    ]
+
+    channels = enabled_channels(feishu, records)
+
+    assert [channel.channel_id for channel in channels] == ["dji", "vivo"]
+    assert channels[0].applications_url.endswith("/deliver-query/dji")
+    assert channels[1].applications_url.endswith("/personal/deliveryRecord")
+
+
 def test_list_enabled_channels_keeps_unsupported_company_visible():
     feishu = FakeFeishu()
     feishu.records = [
-        BaseRecord("dji-parent", {"公司": "大疆", "是否巡检": ["是"]}),
+        BaseRecord("midea-parent", {"公司": "美的", "是否巡检": ["是"]}),
     ]
 
     result = list_enabled_channel_statuses(
@@ -114,9 +128,9 @@ def test_list_enabled_channels_keeps_unsupported_company_visible():
     )
 
     assert result["channels"] == [{
-        "channel_id": "base_dji-parent",
-        "name": "大疆",
-        "company": "大疆",
+        "channel_id": "base_midea-parent",
+        "name": "美的",
+        "company": "美的",
         "status": "暂不支持",
         "detail": "已同步巡检开关，当前版本暂无自动巡检适配",
         "job_progress": [],
@@ -325,10 +339,11 @@ def test_save_chrome_cookies_persists_storage_origins(monkeypatch):
 
 
 def test_chrome_only_channels_skip_headless_check():
-    # 百度 / OPPO 无法无头还原登录态，check_channel 直接返回“需在Chrome核对”，
+    # 百度 / OPPO / 大疆无法无头还原登录态，check_channel 直接返回“需在Chrome核对”，
     # 且不触碰磁盘登录态（无需 auth_store）。
     assert "baidu" in CHROME_ONLY_CHANNEL_IDS
     assert "oppo" in CHROME_ONLY_CHANNEL_IDS
+    assert "dji" in CHROME_ONLY_CHANNEL_IDS
     channel = Channel("baidu", "百度", "百度", "https://talent.baidu.com/jobs/center", (), (), ())
     status = check_channel(channel, auth_store=None)
     assert status.status == "需在Chrome核对"

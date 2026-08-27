@@ -791,8 +791,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .mail-table th:nth-child(4) { width: 80px; }
 .mail-table th:nth-child(5) { width: 116px; }
 .mail-table th:nth-child(6) { width: 94px; }
-.mail-table th:nth-child(7) { width: 132px; }
-.mail-action { width: 100%; min-height: 28px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink-soft); background: #fff; font-size: 11px; }
+.mail-table th:nth-child(7) { width: 188px; }
+.mail-action { flex: 0 0 104px; width: 104px; height: 38px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink-soft); background: #fff; font-size: 11px; }
 .mail-table tr:hover td { background: #fbfcf8; }
 .mail-company, .mail-subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail-company { color: var(--ink); font-weight: 700; }
@@ -800,8 +800,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .mail-table small { display: block; margin-top: 3px; overflow: hidden; color: var(--caption); text-overflow: ellipsis; white-space: nowrap; }
 .mail-category { color: var(--accent); font-weight: 700; }
 .mail-open { display: block; margin-top: 3px; color: var(--accent); font-size: 10px; text-decoration: none; }
-.mail-actions { display: grid; gap: 6px; }
-.mail-actions .mail-open { min-height: 20px; margin: 0; font-weight: 700; line-height: 20px; }
+.mail-actions { display: flex; align-items: center; gap: 10px; min-width: 0; white-space: nowrap; }
+.mail-actions .mail-open { display: inline-flex; flex: 0 0 auto; align-items: center; height: 38px; margin: 0; font-weight: 700; }
 .field-chip.danger { background: #f9e8e6; color: var(--danger); }
 
 .progress-board-surface { max-width: 980px; }
@@ -954,5 +954,5 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   .sync-preferences, .mail-metrics, .mail-filters { grid-template-columns: 1fr; }
   .mail-hero { padding: 22px; }
   .mail-table-wrap { overflow-x: auto; }
-  .mail-table { min-width: 780px; }
+  .mail-table { min-width: 840px; }
 }

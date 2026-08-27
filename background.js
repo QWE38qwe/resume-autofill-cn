@@ -3,10 +3,9 @@ const MAIL_NATIVE_HOST = "cn.local.jianfill.mail";
 const MAIL_ALARM = "jianfill-mail-sync";
 const PROGRESS_ALARM = "jianfill-progress-monitor";
 const NATIVE_MESSAGE_TIMEOUT_MS = 5 * 60 * 1000;
-// 百度即使 Cookie 齐全也会被反爬拦到 about:blank；OPPO 的登录 token 不在可导出的
-// Cookie/localStorage 中。这两个站点无法无头还原登录态，改为读取用户已登录的
-// Chrome 标签页判定状态。
-const CHROME_ONLY_CHANNELS = new Set(["baidu", "oppo"]);
+// 百度受反爬拦截，OPPO 的登录 token 不可导出，大疆则要求每次通过手机号验证码
+// 查询。这些渠道改为读取用户当前 Chrome 标签页判定状态。
+const CHROME_ONLY_CHANNELS = new Set(["baidu", "oppo", "dji"]);
 
 chrome.runtime.onInstalled.addListener(async () => {
   const current = await chrome.storage.local.get(null);
@@ -674,7 +673,9 @@ const progressChannelUrls = {
   pdd: "https://careers.pddglobalhr.com/campus/personal-center",
   oppo: "https://careers.oppo.com/university/oppo/center/history",
   iflytek: "https://iflytek.zhiye.com/personal/deliveryRecord",
-  kuaishou: "https://campus.kuaishou.cn/recruit/campus/e/#/campus/my-apply"
+  kuaishou: "https://campus.kuaishou.cn/recruit/campus/e/#/campus/my-apply",
+  dji: "https://apply.careers.dji.com/candidate/applications/deliver-query/dji",
+  vivo: "https://hr-campus.vivo.com/personal/deliveryRecord"
 };
 
 async function openChromeProgressLogin(channelId) {
@@ -766,7 +767,8 @@ async function saveChromeProgressSession(channelId) {
 // 一步式向导：保存会话 → 立即验证 → 回写飞书，合并为一次调用，避免用户在
 // “保存会话 / 刷新验证”之间来回点击与串联 alert。
 async function saveAndVerifyProgressSession(channelId) {
-  // 百度 / OPPO 无法无头还原登录态，保存 Cookie 没有意义。直接读取已登录的
+  // 百度 / OPPO / 大疆无法无头还原登录态，保存 Cookie 没有意义。直接读取
+  // 已完成验证的
   // Chrome 标签页判定状态并回写飞书。
   if (CHROME_ONLY_CHANNELS.has(channelId)) {
     try {
