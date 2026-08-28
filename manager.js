@@ -359,6 +359,38 @@ function readFileAsDataUrl(file) {
   });
 }
 
+const MAX_RESUME_FILE_SIZE = 5 * 1024 * 1024;
+const RESUME_FILE_ACCEPT = ".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+function validateResumeFile(file) {
+  if (!file) throw new Error("请选择简历附件");
+  const extension = file.name.split(".").pop()?.toLowerCase();
+  if (!["pdf", "doc", "docx"].includes(extension)) {
+    throw new Error("简历附件仅支持 PDF、DOC 或 DOCX");
+  }
+  if (file.size > MAX_RESUME_FILE_SIZE) {
+    throw new Error("简历附件不能超过 5MB");
+  }
+}
+
+async function serializeResumeFile(file) {
+  validateResumeFile(file);
+  return {
+    name: file.name,
+    type: file.type || "application/octet-stream",
+    size: file.size,
+    dataUrl: await readFileAsDataUrl(file),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function profileResumeFileName(profile) {
+  return profile?.resumeFile?.name ||
+    profile?.attachment?.name ||
+    (typeof profile?.attachment === "string" ? profile.attachment : "") ||
+    profile?.resumePath || "";
+}
+
 async function saveAvatarFile(event) {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -627,7 +659,7 @@ function renderVersions() {
         <div class="record-title">
           <div>
             <strong>${safe(profile.name)} ${isDefault ? '<span class="field-chip matched">默认</span>' : ""}</strong>
-            <div class="muted">实习 ${profile.work?.length || 0} 段｜附件 ${safe(profile.attachment || "未绑定")}｜本地简历 ${safe(profile.resumePath || "未填写")}</div>
+            <div class="muted">实习 ${profile.work?.length || 0} 段｜简历附件 ${safe(profileResumeFileName(profile) || "未绑定")}</div>
           </div>
           <div class="record-actions">
             <button class="btn primary small" data-open-version="${profile.id}">${openedVersionId === profile.id ? "收起" : "编辑"}</button>
@@ -681,8 +713,22 @@ function openVersion(id) {
       </div>
       <div class="form-grid">
         <div class="field"><label>简历版本命名</label><input id="vName" value="${safe(profile.name)}"></div>
-        <div class="field"><label>附件</label><input id="vAttachment" value="${safe(profile.attachment)}"></div>
-        <div class="field full-span"><label>本地简历路径</label><input id="vResumePath" value="${safe(profile.resumePath)}" placeholder="例如：/Users/you/Documents/resume-product.pdf"></div>
+        <div class="field version-file-field">
+          <label>简历附件</label>
+          <div class="resume-file-binding">
+            <div class="resume-file-copy">
+              <strong>${safe(profileResumeFileName(profile) || "尚未绑定本地文件")}</strong>
+              <small>${profile.resumeFile?.size
+                ? `${(profile.resumeFile.size / 1024 / 1024).toFixed(2)} MB · 仅保存在本机`
+                : "选择 PDF、DOC 或 DOCX 后，可自动上传到招聘网站的简历附件控件"}</small>
+            </div>
+            <div class="resume-file-actions">
+              <label class="btn secondary" for="vResumeFile">选择文件</label>
+              <input id="vResumeFile" type="file" accept="${RESUME_FILE_ACCEPT}">
+              ${profile.resumeFile ? '<button class="btn ghost danger-btn" id="removeResumeFile">移除</button>' : ""}
+            </div>
+          </div>
+        </div>
       </div>
       <div id="workList"></div>
       <div class="version-summary">
@@ -695,12 +741,44 @@ function openVersion(id) {
   renderWork(profile);
   $("#collapseVersion").onclick = () => toggleVersion(id);
   $("#addWork").onclick = () => openWork(id, -1);
+  $("#vResumeFile").onchange = async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const previous = {
+      resumeFile: profile.resumeFile,
+      attachment: profile.attachment,
+      resumePath: profile.resumePath
+    };
+    try {
+      profile.resumeFile = await serializeResumeFile(file);
+      profile.attachment = file.name;
+      profile.resumePath = file.name;
+      await saveProfiles();
+      openVersion(id);
+      toast("简历附件已绑定", "success");
+    } catch (error) {
+      profile.resumeFile = previous.resumeFile;
+      profile.attachment = previous.attachment;
+      profile.resumePath = previous.resumePath;
+      event.target.value = "";
+      toast(error.message || "简历附件读取失败", "error");
+    }
+  };
+  if ($("#removeResumeFile")) {
+    $("#removeResumeFile").onclick = async () => {
+      if (!confirm("确认移除该版本绑定的简历附件？")) return;
+      delete profile.resumeFile;
+      profile.attachment = "";
+      profile.resumePath = "";
+      await saveProfiles();
+      openVersion(id);
+      toast("简历附件已移除");
+    };
+  }
   $("#saveVersionBase").onclick = async () => {
     const name = $("#vName").value.trim();
     if (!name) return $("#vName").focus();
     profile.name = name;
-    profile.attachment = $("#vAttachment").value.trim();
-    profile.resumePath = $("#vResumePath").value.trim();
     profile.summary = $("#vSummary").value.trim();
     await saveProfiles();
     openVersion(id);
@@ -792,7 +870,7 @@ function openCreateVersion() {
     <div class="section-title">新建空白版本</div>
     <div class="modal-grid">
       <div class="field full-span"><label>简历版本命名</label><input id="newVersionName" placeholder="例如：互联网产品简历"></div>
-      <div class="field full-span"><label>本地简历路径</label><input id="newVersionPath" placeholder="可选，例如：/Users/you/Documents/resume-product.pdf"></div>
+      <div class="field full-span"><label>简历附件（可选）</label><input id="newVersionFile" type="file" accept="${RESUME_FILE_ACCEPT}"></div>
     </div>
     <div class="row">
       <button class="btn ghost" id="cancelModal">取消</button>
@@ -803,18 +881,35 @@ function openCreateVersion() {
   $("#saveNewVersion").onclick = async () => {
     const name = $("#newVersionName").value.trim();
     if (!name) return $("#newVersionName").focus();
+    const file = $("#newVersionFile").files?.[0];
+    let resumeFile = null;
+    try {
+      if (file) resumeFile = await serializeResumeFile(file);
+    } catch (error) {
+      toast(error.message || "简历附件读取失败", "error");
+      return;
+    }
     const profile = {
       id: crypto.randomUUID(),
       name,
       target: "",
       summary: "",
-      attachment: "",
-      resumePath: $("#newVersionPath").value.trim(),
+      attachment: resumeFile?.name || "",
+      resumePath: resumeFile?.name || "",
+      resumeFile,
       work: []
     };
+    const previousActiveProfileId = db.activeProfileId;
     db.profiles.push(profile);
     if (!db.activeProfileId) db.activeProfileId = profile.id;
-    await saveProfiles();
+    try {
+      await saveProfiles();
+    } catch (error) {
+      db.profiles.pop();
+      db.activeProfileId = previousActiveProfileId;
+      toast("简历版本保存失败；可能是本地存储空间不足", "error");
+      return;
+    }
     closeModal();
     toggleVersion(profile.id);
   };
@@ -845,7 +940,14 @@ async function copyVersion(id) {
   copy.name = uniqueCopyName(profile.name);
   db.profiles.push(copy);
   openedVersionId = copy.id;
-  await saveProfiles();
+  try {
+    await saveProfiles();
+  } catch (error) {
+    db.profiles.pop();
+    openedVersionId = id;
+    toast("复制失败；绑定附件较大时可能超出本地存储空间", "error");
+    return;
+  }
   openVersion(copy.id);
   $("#versionEditor").scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -1585,7 +1687,9 @@ function renderMailDashboard() {
                 <td>${item.deadline ? `<time>${safe(item.deadline)}</time>` : '<span class="cell-empty">—</span>'}</td>
                 <td><time>${safe(formatMailTime(item.receivedAt))}</time></td>
                 <td><div class="mail-actions">
-                  ${link ? `<a class="mail-open" href="${safeAttr(link)}" target="_blank" rel="noopener">打开链接 ↗</a>` : ""}
+                  ${link
+                    ? `<a class="mail-open" href="${safeAttr(link)}" target="_blank" rel="noopener">打开链接 ↗</a>`
+                    : '<span class="mail-open is-disabled" aria-disabled="true">打开链接</span>'}
                   <select class="mail-action" data-message-id="${safeAttr(item.messageId)}" aria-label="修改邮件状态"><option value="">修改状态</option><option value="completed">已完成</option><option value="ignored">已忽略</option><option value="confirm_write">确认写入</option></select>
                 </div></td>
               </tr>
@@ -1916,8 +2020,17 @@ $("#parseResume").addEventListener("click", async () => {
     if (text.trim().length < 30) throw new Error("没有读取到足够的简历文本，请确认文件不是扫描图片");
     setParseStatus(`已读取 ${text.length.toLocaleString()} 个字符，正在逐条提取实习经历…`);
     parsedDraft = await parseInternships(text, file.name, providers);
+    try {
+      parsedDraft.resumeFile = await serializeResumeFile(file);
+    } catch (error) {
+      parsedDraft.resumeFile = null;
+      parsedDraft.resumeFileWarning = error.message || "原文件无法绑定为简历附件";
+    }
     renderParsedDraft();
-    setParseStatus(`解析完成：识别到 ${parsedDraft.internships.length} 段实习经历，请逐条核对原文`, "success");
+    setParseStatus(
+      `解析完成：识别到 ${parsedDraft.internships.length} 段实习经历${parsedDraft.resumeFileWarning ? `；${parsedDraft.resumeFileWarning}` : "，原文件已绑定到该版本"}`,
+      parsedDraft.resumeFileWarning ? "" : "success"
+    );
   } catch (error) {
     console.error(error);
     setParseStatus(error.message || "解析失败，请检查文件和 API 设置", "error");
@@ -2150,7 +2263,7 @@ function renderParsedDraft() {
     <div class="parse-preview">
       <div class="parse-preview-head">
         <div class="field"><label>新版本名称</label><input id="parsedVersionName" value="${safe(parsedDraft.versionName)}"></div>
-        <div class="field"><label>本地简历路径</label><input id="parsedResumePath" value="${safe(parsedDraft.resumePath)}" placeholder="可选，浏览器无法自动读取完整路径"></div>
+        <div class="field"><label>绑定附件</label><div class="resume-file-inline">${safe(parsedDraft.resumeFile?.name || parsedDraft.attachment || "未绑定")}</div></div>
         <button class="btn primary" id="createParsedVersion">确认并创建版本</button>
       </div>
       ${parsedDraft.internships.map((work, index) => `
@@ -2214,13 +2327,22 @@ async function createVersionFromParsed() {
     target: "",
     summary: "",
     attachment: parsedDraft.attachment,
-    resumePath: $("#parsedResumePath")?.value.trim() || "",
+    resumePath: parsedDraft.resumeFile?.name || "",
+    resumeFile: parsedDraft.resumeFile || null,
     work: works,
     openQuestions: []
   };
+  const previousActiveProfileId = db.activeProfileId;
   db.profiles.push(profile);
   db.activeProfileId = profile.id;
-  await saveProfiles();
+  try {
+    await saveProfiles();
+  } catch (error) {
+    db.profiles.pop();
+    db.activeProfileId = previousActiveProfileId;
+    setParseStatus("版本保存失败；可能是本地存储空间不足", "error");
+    return;
+  }
   $("#importPanel").classList.add("hidden");
   parsedDraft = null;
   $("#parseResult").innerHTML = "";

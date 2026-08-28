@@ -28,6 +28,7 @@
 
 - 管理个人资料、教育经历、项目、语言、技能、证书和简历版本。
 - 支持头像照片本地保存，并在招聘网站照片上传控件中自动上传。
+- 支持为每个简历版本绑定本地 PDF、DOC 或 DOCX，并在招聘网站简历附件控件中自动上传。
 - 支持一键填写（覆盖已有内容）和补充填写（仅填写空白项）。
 - 支持教育、实习、项目、语言和奖项等重复记录。
 - 支持原生控件及常见 React / Vue 组件、iframe 和开放 Shadow DOM。
@@ -84,7 +85,7 @@ Windows 11 x64 现可通过 PowerShell 安装开发版 Native Host，使用同�
 ## 使用
 
 1. 在扩展管理页打开“简填”的详情页并进入扩展选项。
-2. 维护个人资料、头像照片、教育经历和简历版本。
+2. 维护个人资料、头像照片、教育经历和简历版本；需要自动上传附件时，在版本编辑区绑定本地简历文件。
 3. 打开招聘网站的简历编辑或申请页面。
 4. 在弹窗中选择简历版本。
 5. 点击“补充填写”或“一键填写”。
@@ -134,6 +135,7 @@ Windows 11 x64 现可通过 PowerShell 安装开发版 Native Host，使用同�
 
 - 个人资料、API Key、网申记录和规则保存在 `chrome.storage.local`。
 - 头像照片由用户在管理台主动上传后保存在本机浏览器，不会按本地路径自动读取文件。
+- 简历附件仅在用户主动选择后绑定到对应版本并保存在本机；自动填表只会把它写入明确识别为简历的文件控件。
 - 字段语义映射只向用户配置的 AI 服务发送网页字段元数据和标准字段名称，不发送个人资料值。
 - 使用“导入简历解析”时，所选简历文本会发送给用户配置的 AI 服务。
 - 邮箱账号、客户端授权码和飞书配置保存在 `chrome.storage.local`。
@@ -170,7 +172,7 @@ node --check popup.js
 bash scripts/privacy-check.sh
 ```
 
-京东、Hotjob 和头像回归夹具可通过本地静态服务器打开：
+京东、Hotjob、头像、简历附件和受控输入回归夹具可通过本地静态服务器打开：
 
 ```bash
 python3 -m http.server 8877
@@ -179,6 +181,7 @@ python3 -m http.server 8877
 # 浏览器访问 http://127.0.0.1:8877/tests/hotjob-work-fixture.html
 # 浏览器访问 http://127.0.0.1:8877/tests/feishu-date-range-fixture.html
 # 浏览器访问 http://127.0.0.1:8877/tests/avatar-fixture.html
+# 浏览器访问 http://127.0.0.1:8877/tests/profile-file-and-controlled-input-fixture.html
 ```
 
 ## 安全

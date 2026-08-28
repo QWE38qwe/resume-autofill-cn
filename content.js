@@ -531,11 +531,9 @@ function nearestControlsFromLabel(root, labelNode, key, used) {
       if (textarea) return textarea;
     }
     if (/start|end|date|时间|日期/.test(key)) {
-      const date = candidates.find(control =>
-        control instanceof HTMLInputElement &&
-        (/date|month/.test(control.type) || /请选择|时间|日期/.test(`${control.placeholder || ""}${nearbyTextOf(control, node)}`))
-      );
+      const date = candidates.find(isDateControl);
       if (date) return date;
+      continue;
     }
     return candidates[0];
   }
@@ -708,11 +706,29 @@ function matchControl(element, customFields = []) {
       best = { key, label: match.alias, confidence: match.score };
     }
   });
-  if (!best && element instanceof HTMLInputElement && element.type === "file") {
-    const text = normalizeText(`${element.accept || ""} ${label} ${nearbyTextOf(element)}`);
-    if (/image|头像|照片|证件照|photo|avatar|portrait|headshot/.test(text)) {
-      best = { key: "avatarFile", label: "头像照片", confidence: 86 };
+  if (element instanceof HTMLInputElement && element.type === "file") {
+    const accept = normalizeText(element.accept || "");
+    const explicitText = normalizeText([
+      label,
+      element.id,
+      element.name,
+      element.getAttribute("aria-label"),
+      element.getAttribute("data-label"),
+      element.getAttribute("data-field")
+    ].filter(Boolean).join(" "));
+    if (
+      /image\//.test(accept) ||
+      /头像|照片|证件照|photo|avatar|portrait|headshot/.test(explicitText)
+    ) {
+      return { key: "avatarFile", label: "头像照片", confidence: 96 };
     }
+    if (
+      /简历|履历|resume|curriculumvitae|\bcv\b/.test(explicitText) ||
+      best?.key === "resumeAttachment"
+    ) {
+      return { key: "resumeAttachment", label: "简历附件", confidence: 94 };
+    }
+    return null;
   }
   return best;
 }
@@ -738,6 +754,8 @@ function matchRepeatControl(element) {
 
 function setNativeValue(element, value) {
   const stringValue = String(value ?? "");
+  const previous = String(element.value ?? element.textContent ?? "");
+  element.focus?.();
   if (element.isContentEditable) {
     element.textContent = stringValue;
   } else if (element instanceof HTMLSelectElement) {
@@ -755,13 +773,18 @@ function setNativeValue(element, value) {
     if (setter) setter.call(element, stringValue);
     else element.value = stringValue;
   }
-  ["input", "change", "blur"].forEach(type => {
-    element.dispatchEvent(new Event(type, { bubbles: true }));
-  });
+  if (element._valueTracker) element._valueTracker.setValue(previous);
+  element.dispatchEvent(new InputEvent("input", {
+    bubbles: true,
+    inputType: "insertText",
+    data: stringValue
+  }));
+  element.dispatchEvent(new Event("change", { bubbles: true }));
+  element.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
   return true;
 }
 
-function fileFromStoredAvatar(value) {
+function fileFromStoredData(value) {
   if (!value?.dataUrl || !value?.name) return null;
   const match = String(value.dataUrl).match(/^data:([^;,]+);base64,(.*)$/);
   if (!match) return null;
@@ -776,8 +799,26 @@ function fileFromStoredAvatar(value) {
   });
 }
 
+function fileMatchesAccept(element, file) {
+  const accept = String(element.accept || "").trim();
+  if (!accept) return true;
+  const fileName = file.name.toLowerCase();
+  const fileType = String(file.type || "").toLowerCase();
+  return accept.split(",").map(item => item.trim().toLowerCase()).some(rule => {
+    if (!rule) return false;
+    if (rule.startsWith(".")) return fileName.endsWith(rule);
+    if (rule.endsWith("/*")) return fileType.startsWith(rule.slice(0, -1));
+    return fileType === rule;
+  });
+}
+
 function setFileInput(element, file) {
-  if (!(element instanceof HTMLInputElement) || element.type !== "file" || !file) return false;
+  if (
+    !(element instanceof HTMLInputElement) ||
+    element.type !== "file" ||
+    !file ||
+    !fileMatchesAccept(element, file)
+  ) return false;
   const transfer = new DataTransfer();
   transfer.items.add(file);
   element.files = transfer.files;
@@ -785,6 +826,75 @@ function setFileInput(element, file) {
     element.dispatchEvent(new Event(type, { bubbles: true }));
   });
   return element.files?.length > 0;
+}
+
+function plainValueMatches(element, expected) {
+  const actual = String(element.value ?? element.textContent ?? "").trim();
+  const target = String(expected ?? "").trim();
+  if (normalizeText(actual) === normalizeText(target)) return true;
+  const actualDigits = actual.replace(/\D/g, "");
+  const targetDigits = target.replace(/\D/g, "");
+  return targetDigits.length >= 6 && actualDigits === targetDigits;
+}
+
+function plainControlSignature(element) {
+  return {
+    tagName: element.tagName,
+    type: element.getAttribute?.("type") || "",
+    id: element.id || "",
+    name: element.getAttribute?.("name") || "",
+    fieldId: element.getAttribute?.("data-form-field-id") || "",
+    fieldName: element.getAttribute?.("data-form-field-name") || "",
+    placeholder: element.getAttribute?.("placeholder") || "",
+    label: normalizeText(labelOf(element))
+  };
+}
+
+function replacementPlainControl(signature) {
+  const candidates = fieldTargets().filter(element =>
+    element.tagName === signature.tagName &&
+    (element.getAttribute?.("type") || "") === signature.type
+  );
+  const exactAttribute = [
+    ["id", signature.id],
+    ["name", signature.name],
+    ["data-form-field-id", signature.fieldId],
+    ["data-form-field-name", signature.fieldName]
+  ].find(([attribute, value]) =>
+    value && candidates.some(element =>
+      (attribute === "id" ? element.id : element.getAttribute(attribute)) === value
+    )
+  );
+  if (exactAttribute) {
+    const [attribute, value] = exactAttribute;
+    return candidates.find(element =>
+      (attribute === "id" ? element.id : element.getAttribute(attribute)) === value
+    ) || null;
+  }
+  return candidates.find(element =>
+    signature.placeholder &&
+    element.getAttribute("placeholder") === signature.placeholder &&
+    normalizeText(labelOf(element)) === signature.label
+  ) || null;
+}
+
+async function fillPlainControl(element, value) {
+  const signature = plainControlSignature(element);
+  if (!setNativeValue(element, value)) return "failed";
+  await sleep(160);
+  if (element.isConnected && plainValueMatches(element, value)) return "filled";
+
+  const target = element.isConnected ? element : replacementPlainControl(signature);
+  if (!target) return "failed";
+  if (target.isContentEditable) {
+    setNativeValue(target, value);
+  } else {
+    setSearchValue(target, value);
+    target.dispatchEvent(new Event("change", { bubbles: true }));
+    target.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+  }
+  await sleep(180);
+  return target.isConnected && plainValueMatches(target, value) ? "filled" : "failed";
 }
 
 function setSearchValue(element, value) {
@@ -1078,6 +1188,61 @@ async function fillAtsxDateRange(block, record, overwrite, used) {
   return { handled: true, filled: filled + 1, failed: 0 };
 }
 
+async function chooseAtsxPeriodMonth(label, value) {
+  const date = splitDate(value);
+  const year = Number(date.year);
+  const month = Number(date.month);
+  if (!label || !year || !month) return false;
+  clickElement(label);
+  await sleep(180);
+  const panel = visibleOne(".atsx-date-picker-period-month-panel");
+  const lists = [...(panel?.querySelectorAll(".atsx-date-picker-period-month-panel-list") || [])]
+    .filter(isVisible);
+  if (lists.length < 2) return false;
+  const findItem = (list, expected) =>
+    [...list.querySelectorAll(".atsx-date-picker-period-month-panel-list-item")]
+      .find(item => Number(normalizeText(item.textContent).match(/\d+/)?.[0] || 0) === expected);
+  const yearItem = findItem(lists[0], year);
+  const monthItem = findItem(lists[1], month);
+  if (!yearItem || !monthItem) return false;
+  clickElement(yearItem);
+  await sleep(80);
+  clickElement(monthItem);
+  await sleep(160);
+  const text = normalizeText(label.textContent);
+  return text.includes(String(year)) && text.includes(String(month));
+}
+
+async function fillAtsxPeriodMonthRange(block, record, overwrite, used) {
+  const wrappers = queryAllDeep(block, ".atsx-date-picker-period-month")
+    .filter(wrapper => {
+      const hidden = wrapper.querySelector(".atsx-date-picker-period-hidden-input");
+      return hidden && !used.has(hidden);
+    });
+  const wrapper = wrappers[0];
+  if (!wrapper) return { handled: false, filled: 0, failed: 0 };
+
+  const hidden = wrapper.querySelector(".atsx-date-picker-period-hidden-input");
+  const labels = [...wrapper.querySelectorAll(".atsx-date-picker-period-month-label")].slice(0, 2);
+  used.add(hidden);
+  if (labels.length < 2) return { handled: true, filled: 0, failed: 1 };
+
+  const targets = [record.start, record.end];
+  let filled = 0;
+  let failed = 0;
+  for (let index = 0; index < labels.length; index += 1) {
+    const existing = normalizeText(labels[index].textContent);
+    if (!overwrite && /\d{4}/.test(existing)) continue;
+    if (!targets[index]) {
+      if (!(index === 1 && recordWantsPresent(record))) failed += 1;
+      continue;
+    }
+    if (await chooseAtsxPeriodMonth(labels[index], targets[index])) filled += 1;
+    else failed += 1;
+  }
+  return { handled: true, filled, failed };
+}
+
 async function fillThroneDateRange(block, record, overwrite, used) {
   const wrappers = queryAllDeep(block, ".throne-biz-date-range-picker-wrapper")
     .filter(wrapper => {
@@ -1115,11 +1280,11 @@ async function fillThroneDateRange(block, record, overwrite, used) {
 async function chooseAntDate(element, value) {
   const picker = element.closest?.(".ant-calendar-picker");
   if (!picker) return false;
-  const match = String(value || "").match(/(\d{4})\D{0,3}(\d{1,2})\D{0,3}(\d{1,2})/);
+  const match = String(value || "").match(/(\d{4})\D{0,3}(\d{1,2})(?:\D{0,3}(\d{1,2}))?/);
   if (!match) return false;
   const targetYear = Number(match[1]);
   const targetMonth = Number(match[2]);
-  const targetDay = Number(match[3]);
+  const targetDay = Number(match[3] || 1);
 
   clickElement(picker);
   await sleep(220);
@@ -1295,28 +1460,42 @@ function optionMatchText(text, value) {
   return optionScore(text, value) > 0;
 }
 
-function bestOption(options, value) {
-  return options
-    .map(option => ({ option, score: optionScore(option.innerText || option.textContent || option.value, value) }))
+function isSchoolControl(element) {
+  return /学校|院校|school|university/.test(normalizeText(labelOf(element)));
+}
+
+function bestOption(options, value, exactOnly = false) {
+  const unique = [...new Set(options.map(clickableOption).filter(Boolean))];
+  return unique
+    .map(option => ({
+      option,
+      score: normalizeText(option.innerText || option.textContent || option.value) === normalizeText(value)
+        ? 100
+        : exactOnly ? 0 : optionScore(option.innerText || option.textContent || option.value, value)
+    }))
     .filter(item => item.score > 0)
     .sort((left, right) => right.score - left.score)[0]?.option || null;
 }
 
 function clickableOption(option) {
   if (!option) return null;
-  if (option.matches([
+  const selector = [
     "[role=option]",
     ".ant-select-item-option",
+    ".ant-select-dropdown-menu-item",
+    ".atsx-select-dropdown-menu-item",
     ".el-select-dropdown__item",
     ".ivu-select-item",
     "[class*='Menu-container']",
     "button",
     "li"
-  ].join(","))) {
-    return option;
-  }
-  return option.querySelector([
+  ].join(",");
+  if (option.matches(selector)) return option;
+  return option.closest(selector) || option.querySelector([
     "[role=option]",
+    ".ant-select-item-option",
+    ".ant-select-dropdown-menu-item",
+    ".atsx-select-dropdown-menu-item",
     "[class*='Menu-container']",
     "button",
     "li"
@@ -1428,15 +1607,26 @@ async function chooseControl(element, value) {
     setSearchValue(input, value);
     await sleep(260);
   }
-  const options = optionCandidates(target);
-  const option = bestOption(options, value);
+  let options = [];
+  let option = null;
+  const exactOnly = isSchoolControl(element);
+  const attempts = input ? 7 : 2;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    options = optionCandidates(target);
+    option = bestOption(options, value, exactOnly);
+    if (option) break;
+    await sleep(180);
+  }
   if (!option) {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     return false;
   }
   clickElement(clickableOption(option));
   await sleep(160);
-  return true;
+  const selected = controlCurrentValue(element);
+  return exactOnly
+    ? normalizeText(selected) === normalizeText(value)
+    : optionMatchText(selected, value);
 }
 
 function formatDateValue(element, value) {
@@ -1522,7 +1712,7 @@ async function fillControl(element, value, overwrite = false) {
   if (value == null || (typeof value !== "object" && String(value).trim() === "")) return "empty";
   if (element instanceof HTMLInputElement && element.type === "file") {
     if (!overwrite && element.files?.length) return "skipped";
-    const file = fileFromStoredAvatar(value);
+    const file = fileFromStoredData(value);
     return setFileInput(element, file) ? "filled" : "file";
   }
   if (componentType(element) === "option-group") {
@@ -1579,7 +1769,7 @@ async function fillControl(element, value, overwrite = false) {
     return await chooseControl(element, value) ? "filled" : "failed";
   }
   if (element.readOnly) return "readonly";
-  return setNativeValue(element, value) ? "filled" : "failed";
+  return fillPlainControl(element, value);
 }
 
 function sectionFieldScore(node, definition) {
@@ -1606,11 +1796,13 @@ function findSection(titles, definition) {
     let node = heading;
     for (let depth = 1; depth <= 9 && node?.parentElement; depth += 1) {
       node = node.parentElement;
+      if (node.matches?.("form,body,html")) continue;
       const count = controls(node).length;
-      if (count < 2 || count > 100) continue;
       const fieldScore = sectionFieldScore(node, definition);
-      if (definition && fieldScore < 2) continue;
-      const add = findAddButton(node);
+      const add = findAddButton(node, definition);
+      const hasRecordFields = count >= 2 && count <= 60 && (!definition || fieldScore >= 2);
+      const emptyRepeatSection = Boolean(add) && count <= 30;
+      if (!hasRecordFields && !emptyRepeatSection) continue;
       candidates.push({
         node,
         score: depth * 12 + count * 1.5 - fieldScore * 12 - (add ? 6 : 0)
@@ -1622,13 +1814,30 @@ function findSection(titles, definition) {
   return candidates[0]?.node || null;
 }
 
-function findAddButton(root) {
+function repeatAddTokens(definition) {
+  return {
+    education: ["教育", "学历", "学习", "education"],
+    work: ["实习", "工作", "任职", "employment", "work"],
+    projects: ["项目", "实践", "project"],
+    languages: ["语言", "外语", "language"],
+    skills: ["技能", "skill"],
+    awards: ["获奖", "奖项", "荣誉", "award", "honor"],
+    papers: ["论文", "专著", "学术", "paper", "publication"],
+    certificates: ["证书", "资格", "certificate", "license"],
+    portfolio: ["作品", "portfolio"]
+  }[definition?.type] || [];
+}
+
+function findAddButton(root, definition) {
   const candidates = queryAllDeep(root, "button,a,[role=button],div,span").filter(element => {
     if (!isVisible(element) || element.disabled) return false;
     const text = normalizeText(element.innerText || element.textContent || element.getAttribute("aria-label"));
-    return /^(添加|新增|增加|继续添加|添加一条|新增一条|添加经历|新增经历|add|addanother|addmore|\+)$/.test(text) ||
+    const isAdd = /^(添加|新增|增加|继续添加|添加一条|新增一条|添加经历|新增经历|add|addanother|addmore|\+)$/.test(text) ||
       /^(\+)?(添加|新增|增加)/.test(text) ||
       /^add(another|more|education|employment|experience|work|project|award|certificate)?/.test(text);
+    if (!isAdd || !definition) return isAdd;
+    const generic = /^(添加|新增|增加|继续添加|添加一条|新增一条|添加经历|新增经历|add|addanother|addmore|\+)$/.test(text);
+    return generic || repeatAddTokens(definition).some(token => text.includes(normalizeText(token)));
   });
   candidates.sort((left, right) => {
     const leftCursor = getComputedStyle(left).cursor === "pointer" ? 0 : 1;
@@ -1745,12 +1954,39 @@ function isBlankControl(element) {
 }
 
 function dateLayoutControls(block) {
-  return controls(block).filter(control => {
-    if (!(control instanceof HTMLInputElement)) return false;
-    if (control.type === "checkbox" || control.type === "radio" || control.type === "file") return false;
-    const text = normalizeText(`${control.type || ""} ${control.placeholder || ""} ${labelOf(control)} ${control.className || ""}`);
-    return /请选择|日期|时间|年月|date|month|calendar|picker/.test(text) || control.readOnly;
-  });
+  return controls(block).filter(isDateControl);
+}
+
+function isDateControl(control) {
+  if (!(control instanceof HTMLInputElement)) return false;
+  if (control.type === "checkbox" || control.type === "radio" || control.type === "file") return false;
+  if (/date|month|time/.test(control.type || "")) return true;
+  if (control.closest?.([
+    ".ant-picker",
+    ".ant-calendar-picker",
+    ".atsx-calendar-picker",
+    ".atsx-date-picker",
+    ".throne-biz-date-range-picker-wrapper"
+  ].join(","))) return true;
+  const explicit = normalizeText(
+    `${control.placeholder || ""} ${control.getAttribute("aria-label") || ""} ${control.className || ""}`
+  );
+  return /日期|时间|年月|yyyy|mm|date|month|calendar|picker/.test(explicit);
+}
+
+function dateValueForBoundary(value, boundary, control) {
+  const source = String(value || "").trim();
+  const match = source.match(/^(\d{4})\D{0,3}(\d{1,2})(?:\D{0,3}(\d{1,2}))?$/);
+  if (!match || match[3]) return source;
+  const requiresDay = Boolean(control?.closest?.(".ant-picker,.ant-calendar-picker")) &&
+    !/month|月份|年月/.test(normalizeText(
+      `${control?.placeholder || ""} ${control?.className || ""} ${control?.closest?.(".ant-picker,.ant-calendar-picker")?.className || ""}`
+    ));
+  if (!requiresDay) return source;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = boundary === "end" ? new Date(year, month, 0).getDate() : 1;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 async function fillWorkByLayout(block, record, overwrite, used) {
@@ -1787,13 +2023,19 @@ async function fillWorkByLayout(block, record, overwrite, used) {
     }
   }
 
-  const throneResult = await fillThroneDateRange(block, record, overwrite, used);
-  const atsxResult = throneResult.handled
+  const periodResult = await fillAtsxPeriodMonthRange(block, record, overwrite, used);
+  const throneResult = periodResult.handled
+    ? { handled: false, filled: 0, failed: 0 }
+    : await fillThroneDateRange(block, record, overwrite, used);
+  const atsxResult = periodResult.handled || throneResult.handled
     ? { handled: false, filled: 0, failed: 0 }
     : await fillAtsxDateRange(block, record, overwrite, used);
-  let dateFailed = throneResult.failed + atsxResult.failed;
+  let dateFailed = periodResult.failed + throneResult.failed + atsxResult.failed;
   let partsResult = { filled: 0, failed: 0, handled: false };
-  if (throneResult.handled) {
+  if (periodResult.handled) {
+    filled += periodResult.filled;
+    notes.push("起止年月（飞书月份组件）");
+  } else if (throneResult.handled) {
     filled += throneResult.filled;
     notes.push("起止年月（字节范围组件）");
   } else if (atsxResult.handled) {
@@ -1804,19 +2046,21 @@ async function fillWorkByLayout(block, record, overwrite, used) {
     filled += partsResult.filled;
     dateFailed += partsResult.failed;
   }
-  if (!throneResult.handled && !atsxResult.handled && partsResult.handled) {
+  if (!periodResult.handled && !throneResult.handled && !atsxResult.handled && partsResult.handled) {
     notes.push("起止年月");
-  } else if (!throneResult.handled && !atsxResult.handled && !partsResult.handled) {
+  } else if (!periodResult.handled && !throneResult.handled && !atsxResult.handled && !partsResult.handled) {
     if (startControl && record.start && (overwrite || isBlankControl(startControl))) {
-      const selected = await choosePhoenixMonth(startControl, record.start);
-      if (!selected) forceNativeValue(startControl, formatDateValue(startControl, record.start));
+      const value = dateValueForBoundary(record.start, "start", startControl);
+      const selected = await choosePhoenixMonth(startControl, value);
+      if (!selected) forceNativeValue(startControl, formatDateValue(startControl, value));
       used.add(startControl);
       filled += 1;
       notes.push(selected ? "开始时间（面板选择）" : "开始时间（写值兜底）");
     }
     if (endControl && record.end && (overwrite || isBlankControl(endControl))) {
-      const selected = await choosePhoenixMonth(endControl, record.end);
-      if (!selected) forceNativeValue(endControl, formatDateValue(endControl, record.end));
+      const value = dateValueForBoundary(record.end, "end", endControl);
+      const selected = await choosePhoenixMonth(endControl, value);
+      if (!selected) forceNativeValue(endControl, formatDateValue(endControl, value));
       used.add(endControl);
       filled += 1;
       notes.push(selected ? "结束时间（面板选择）" : "结束时间（写值兜底）");
@@ -1931,7 +2175,7 @@ async function ensureRecordBlocks(root, definition, count) {
   let blocks = recordBlocks(root, definition);
   let attempts = 0;
   while (blocks.length < count && attempts < count + 2) {
-    const button = findAddButton(root);
+    const button = findAddButton(root, definition);
     if (!button) break;
     button.click();
     await sleep(420);
@@ -2017,6 +2261,8 @@ async function fillYearMonthParts(block, record, overwrite, used) {
 async function fillDateRange(block, record, overwrite, used) {
   const startAliases = ["开始时间", "起始时间", "入学时间", "就读开始时间", "开始日期", "起止时间", "start date", "from"];
   const endAliases = ["结束时间", "毕业时间", "离职时间", "就读结束时间", "结束日期", "end date", "to"];
+  const periodResult = await fillAtsxPeriodMonthRange(block, record, overwrite, used);
+  if (periodResult.handled) return periodResult.filled;
   const throneResult = await fillThroneDateRange(block, record, overwrite, used);
   if (throneResult.handled) return throneResult.filled;
   const atsxResult = await fillAtsxDateRange(block, record, overwrite, used);
@@ -2030,11 +2276,13 @@ async function fillDateRange(block, record, overwrite, used) {
   if (startControl) endUsed.add(startControl);
   const endControl = findControlByAliases(block, endAliases, endUsed, "end");
   if (startControl && record.start) {
-    if (await fillControl(startControl, record.start, overwrite) === "filled") filled += 1;
+    const value = dateValueForBoundary(record.start, "start", startControl);
+    if (await fillControl(startControl, value, overwrite) === "filled") filled += 1;
     used.add(startControl);
   }
   if (endControl && record.end) {
-    if (await fillControl(endControl, record.end, overwrite) === "filled") filled += 1;
+    const value = dateValueForBoundary(record.end, "end", endControl);
+    if (await fillControl(endControl, value, overwrite) === "filled") filled += 1;
     used.add(endControl);
   }
   if (startControl || endControl) return filled;
@@ -2045,11 +2293,13 @@ async function fillDateRange(block, record, overwrite, used) {
     return /date|month|时间|日期|年月/.test(text);
   });
   if (genericDates[0] && record.start) {
-    if (await fillControl(genericDates[0], record.start, overwrite) === "filled") filled += 1;
+    const value = dateValueForBoundary(record.start, "start", genericDates[0]);
+    if (await fillControl(genericDates[0], value, overwrite) === "filled") filled += 1;
     used.add(genericDates[0]);
   }
   if (genericDates[1] && record.end) {
-    if (await fillControl(genericDates[1], record.end, overwrite) === "filled") filled += 1;
+    const value = dateValueForBoundary(record.end, "end", genericDates[1]);
+    if (await fillControl(genericDates[1], value, overwrite) === "filled") filled += 1;
     used.add(genericDates[1]);
   }
   return filled;
@@ -2161,6 +2411,7 @@ async function fillRepeatedSections(store, profile, overwrite) {
         status: result.filled ? "已填写" : "未匹配"
       });
     }
+    blocks.forEach(block => controls(block).forEach(control => handled.add(control)));
     if (blocks.length < records.length) {
       items.push({
         label: `${definition.titles[0]}：网页未能追加到 ${records.length} 条`,
@@ -2217,7 +2468,9 @@ function flattened(personal, education, profile, skills = [], languages = []) {
     skillsSummary: skills.map(skill => skill.name).filter(Boolean).join("、"),
     languagesSummary: languages.map(language => language.language || language.exam).filter(Boolean).join("、"),
     avatarFile: personal.avatarFile || null,
-    resumeAttachment: profile?.attachment || personal.resumeAttachment || "",
+    resumeAttachment: profile?.resumeFile ||
+      (typeof profile?.attachment === "object" ? profile.attachment : null) ||
+      personal.resumeAttachment || "",
     summary: profile?.summary || personal.summary || ""
   };
 }
@@ -2241,6 +2494,21 @@ function hasMappedValue(value) {
 async function fillBaseFields(data, customFields, settings, handled, targets, aiResult) {
   const items = [];
   const candidates = new Map(availableCandidates(data, customFields, settings).map(candidate => [candidate.key, candidate]));
+  const claimedSingleValueKeys = new Set();
+  const singleValueKeys = new Set([
+    "name", "englishName", "gender", "birthDate", "age", "nationality", "ethnicity",
+    "politics", "maritalStatus", "health", "height", "weight", "nativePlace",
+    "birthplace", "household", "currentCity", "address", "country", "province", "city",
+    "postalCode", "phone", "phoneCountryCode", "email", "wechat", "qq", "linkedin",
+    "github", "personalWebsite", "portfolioUrl", "specialty", "identityNumber",
+    "identityType", "emergencyContactName", "emergencyContactRelation",
+    "emergencyContactPhone", "graduationYear", "graduationDate", "overseasExperience",
+    "expectedRole", "targetIndustry", "targetFunction", "expectedCity", "jobType",
+    "latestCompany", "currentPosition", "currentDepartment", "availableDate",
+    "availableDays", "internshipStartDate", "internshipDuration", "willingRelocate",
+    "recruitmentSource", "relativesAtCompany", "drivingLicense", "avatarFile",
+    "resumeAttachment", "skillsSummary", "languagesSummary", "summary"
+  ]);
   for (let index = 0; index < targets.length; index += 1) {
     const element = targets[index];
     const ruleMatch = matchControl(element, customFields);
@@ -2258,6 +2526,8 @@ async function fillBaseFields(data, customFields, settings, handled, targets, ai
       }
     }
     if (!match) continue;
+    if (singleValueKeys.has(match.key) && claimedSingleValueKeys.has(match.key)) continue;
+    if (singleValueKeys.has(match.key)) claimedSingleValueKeys.add(match.key);
     handled.add(element);
     const value = mappedValue(match.key, data, customFields, settings);
     if (!hasMappedValue(value)) {

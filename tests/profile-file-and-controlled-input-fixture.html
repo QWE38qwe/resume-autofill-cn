@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Profile File And Controlled Input Fixture</title>
+</head>
+<body>
+  <h1>基础字段与版本附件夹具</h1>
+
+  <label for="name">姓名</label>
+  <input id="name" type="text" placeholder="请输入姓名">
+
+  <label for="identity">身份证号</label>
+  <input id="identity" type="text" placeholder="请输入身份证号">
+
+  <label for="avatar">头像照片</label>
+  <input id="avatar" type="file" accept="image/png,image/jpeg">
+
+  <label for="resume">上传简历附件</label>
+  <input id="resume" type="file" accept=".pdf,.doc,.docx,application/pdf">
+
+  <label for="identity-file">身份证附件</label>
+  <input id="identity-file" type="file" accept=".pdf,application/pdf">
+
+  <button id="run">运行夹具</button>
+  <pre id="result">not-run</pre>
+
+  <script>
+    const avatarDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    const resumeDataUrl = "data:application/pdf;base64,JVBERi0xLjQKJSVFT0YK";
+
+    function replaceOnFirstInput(id) {
+      const input = document.getElementById(id);
+      input.addEventListener("input", () => {
+        const replacement = input.cloneNode();
+        replacement.value = "";
+        input.replaceWith(replacement);
+      }, { once: true });
+    }
+
+    replaceOnFirstInput("name");
+    replaceOnFirstInput("identity");
+
+    globalThis.chrome = {
+      storage: {
+        local: {
+          async get() {
+            return {
+              personal: {
+                name: "测试姓名",
+                identityNumber: "310000200001010000",
+                avatarFile: {
+                  name: "avatar.png",
+                  type: "image/png",
+                  size: 68,
+                  dataUrl: avatarDataUrl,
+                  updatedAt: "2026-01-01T00:00:00.000Z"
+                }
+              },
+              education: [],
+              projects: [],
+              languages: [],
+              skills: [],
+              awards: [],
+              papers: [],
+              certificates: [],
+              portfolio: [],
+              profiles: [{
+                id: "profile-1",
+                name: "测试版本",
+                resumeFile: {
+                  name: "resume.pdf",
+                  type: "application/pdf",
+                  size: 15,
+                  dataUrl: resumeDataUrl,
+                  updatedAt: "2026-01-01T00:00:00.000Z"
+                },
+                work: []
+              }],
+              activeProfileId: "profile-1",
+              settings: {},
+              customFields: []
+            };
+          },
+          async set() {}
+        }
+      },
+      runtime: {
+        onMessage: { addListener() {} },
+        sendMessage: async () => ({})
+      }
+    };
+  </script>
+  <script src="../content.js"></script>
+  <script>
+    document.getElementById("run").addEventListener("click", async () => {
+      const output = await window.__jianfillTest.fillCurrentFrame("full");
+      const result = {
+        name: document.getElementById("name").value,
+        identity: document.getElementById("identity").value,
+        avatarName: document.getElementById("avatar").files[0]?.name || "",
+        resumeName: document.getElementById("resume").files[0]?.name || "",
+        identityFileCount: document.getElementById("identity-file").files.length,
+        uploadedCount: output.items.filter(item => item.status === "已上传").length
+      };
+      result.pass =
+        result.name === "测试姓名" &&
+        result.identity === "310000200001010000" &&
+        result.avatarName === "avatar.png" &&
+        result.resumeName === "resume.pdf" &&
+        result.identityFileCount === 0 &&
+        result.uploadedCount === 2;
+      document.getElementById("result").textContent = JSON.stringify(result, null, 2);
+    });
+  </script>
+</body>
+</html>

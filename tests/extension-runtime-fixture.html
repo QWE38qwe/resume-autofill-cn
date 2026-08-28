@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Extension Runtime Fixture</title>
+</head>
+<body>
+  <h1>扩展运行时夹具</h1>
+
+  <label for="name">姓名</label>
+  <input id="name" type="text" placeholder="请输入姓名">
+
+  <label for="identity">身份证号</label>
+  <input id="identity" type="text" placeholder="请输入身份证号">
+
+  <label for="avatar">头像照片</label>
+  <input id="avatar" type="file" accept="image/png,image/jpeg">
+
+  <label for="resume">上传简历附件</label>
+  <input id="resume" type="file" accept=".pdf,.doc,.docx,application/pdf">
+
+  <label for="identity-file">身份证附件</label>
+  <input id="identity-file" type="file" accept=".pdf,application/pdf">
+
+  <script>
+    function replaceOnFirstInput(id) {
+      const input = document.getElementById(id);
+      input.addEventListener("input", () => {
+        const replacement = input.cloneNode();
+        replacement.value = "";
+        input.replaceWith(replacement);
+      }, { once: true });
+    }
+
+    replaceOnFirstInput("name");
+    replaceOnFirstInput("identity");
+  </script>
+</body>
+</html>
