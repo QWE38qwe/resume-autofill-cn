@@ -167,7 +167,7 @@
   globalThis.chrome = {
     runtime: {
       id: "",
-      getManifest: () => ({ version: "0.19.1" }),
+      getManifest: () => ({ version: "0.19.2" }),
       getURL: path => demoRequested && path.includes("local-config.json")
         ? new URL("../__missing_local_config__.json", location.href).href
         : new URL(`../${path}`, location.href).href,
