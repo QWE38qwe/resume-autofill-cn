@@ -50,6 +50,18 @@
           <span class="atsx-select-selection-selected-value"></span>
         </span>
       </label>
+      <label>是否双学位
+        <span class="atsx-select" data-select="double-degree">
+          <span class="atsx-select-selection__placeholder">请选择</span>
+          <span class="atsx-select-selection-selected-value"></span>
+        </span>
+      </label>
+      <label>是否MBA
+        <span class="atsx-select" data-select="mba">
+          <span class="atsx-select-selection__placeholder">请选择</span>
+          <span class="atsx-select-selection-selected-value"></span>
+        </span>
+      </label>
     </div>
   </section>
 
@@ -87,6 +99,7 @@
     <div class="atsx-calendar-range-part atsx-calendar-range-left"></div>
     <div class="atsx-calendar-range-part atsx-calendar-range-right"></div>
   </div>
+  <button id="run-fixture" type="button">运行夹具</button>
   <pre id="result">not-run</pre>
 
   <script>
@@ -97,7 +110,9 @@
         major: "应保留的新专业",
         level: "硕士研究生",
         type: "全日制",
-        rank: "Top 10%",
+        rank: "专业排名前10%",
+        doubleDegree: "是",
+        mba: "否",
         start: "2024-07",
         end: "2027-06"
       }],
@@ -196,7 +211,9 @@
     const selectOptions = {
       degree: ["博士", "MBA", "硕士", "本科", "大专", "高中", "其他"],
       "education-type": ["海外及港澳台", "统招全日制", "统招非全日制", "自考", "其他"],
-      rank: ["前 5%", "前 10%", "前 20%", "前 30%", "前 50%", "其他"]
+      rank: ["前 5%", "前10%（含）", "前 20%", "前 30%", "前 50%", "其他"],
+      "double-degree": ["是", "否"],
+      mba: ["是", "否"]
     };
     document.querySelectorAll(".atsx-select").forEach(select => {
       select.onclick = () => {
@@ -266,7 +283,9 @@
           educationDates[1] === "2027-06" &&
           educationChoices.degree === "硕士" &&
           educationChoices["education-type"] === "统招全日制" &&
-          educationChoices.rank === "前 10%" &&
+          educationChoices.rank === "前10%（含）" &&
+          educationChoices["double-degree"] === "是" &&
+          educationChoices.mba === "否" &&
           workDates[0][0] === "2023-04" &&
           workDates[0][1] === "2024-08" &&
           workDates[1][0] === "2025-01" &&
@@ -278,5 +297,14 @@
     });
   </script>
   <script src="../content.js"></script>
+  <script>
+    document.querySelector("#run-fixture").addEventListener("click", () => {
+      window.runFeishuDateRangeFixture().catch(error => {
+        document.querySelector("#result").textContent = JSON.stringify({
+          error: error.message
+        });
+      });
+    });
+  </script>
 </body>
 </html>

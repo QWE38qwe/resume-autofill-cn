@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Bilibili resume fixture</title>
+  <style>
+    body { font: 16px sans-serif; }
+    .bili-resume-card, .bili-form-multiple {
+      margin: 16px;
+      padding: 16px;
+      border: 1px solid #ccc;
+    }
+    .bili-form-flex { margin: 10px 0; }
+    .ant-form-item-label, .ant-calendar-picker { display: inline-block; }
+    .ant-calendar { position: fixed; top: 10px; right: 10px; padding: 12px; background: #fff; border: 1px solid #999; }
+    .ant-calendar-month-panel-cell { display: inline-block; padding: 5px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main class="bili-resume">
+    <section class="bili-resume-card" id="resume实习/工作经历">
+      <header class="bili-form-card-header">实习/工作经历</header>
+      <div class="bili-form-card-body">
+        <div class="records" data-records="work"></div>
+        <div class="bili-form-add" data-add="work">添加实习/工作经历</div>
+      </div>
+    </section>
+
+    <section class="bili-resume-card" id="resume项目经历">
+      <header class="bili-form-card-header">项目经历</header>
+      <div class="bili-form-card-body">
+        <div class="records" data-records="projects"></div>
+        <div class="bili-form-add" data-add="projects">添加项目经历</div>
+      </div>
+    </section>
+  </main>
+
+  <button id="run-fixture" type="button">运行夹具</button>
+  <pre id="result">not-run</pre>
+
+  <script>
+    const fixtureStore = {
+      personal: {},
+      education: [],
+      profiles: [{
+        id: "fixture-profile",
+        name: "B站测试简历",
+        work: [{
+          company: "甲公司",
+          position: "产品实习生",
+          start: "2024-03",
+          end: "2024-08",
+          description: "负责需求分析"
+        }, {
+          company: "乙公司",
+          position: "策略实习生",
+          start: "2025-01",
+          end: "2025-06",
+          description: "负责策略迭代"
+        }]
+      }],
+      activeProfileId: "fixture-profile",
+      projects: [{
+        name: "项目甲",
+        role: "产品负责人",
+        start: "2023-05",
+        end: "2023-11",
+        content: "项目背景",
+        duty: "本人职责",
+        result: "项目成果",
+        link: "https://example.invalid/project-a"
+      }, {
+        name: "项目乙",
+        role: "核心成员",
+        start: "2024-01",
+        end: "2024-09",
+        content: "项目内容乙",
+        duty: "职责乙",
+        result: "成果乙"
+      }],
+      languages: [],
+      skills: [],
+      awards: [],
+      papers: [],
+      certificates: [],
+      portfolio: [],
+      customFields: [],
+      settings: {}
+    };
+
+    window.chrome = {
+      storage: {
+        local: {
+          get: async keys => Object.fromEntries(keys.map(key => [key, fixtureStore[key]]))
+        }
+      },
+      runtime: {
+        sendMessage: async () => ({ matches: [], source: "disabled" }),
+        onMessage: { addListener: () => {} }
+      }
+    };
+
+    function formItem(label, control) {
+      const item = document.createElement("div");
+      item.className = "ant-form-item bili-form-flex";
+      item.innerHTML = `<div class="ant-form-item-label"><label>${label}</label></div>`;
+      item.append(control);
+      return item;
+    }
+
+    function textControl(placeholder, textarea = false) {
+      const control = document.createElement(textarea ? "textarea" : "input");
+      control.className = "ant-input";
+      control.placeholder = placeholder;
+      return control;
+    }
+
+    function openMonthPanel(input) {
+      document.querySelector(".ant-calendar")?.remove();
+      const panel = document.createElement("div");
+      panel.className = "ant-calendar";
+      panel.innerHTML = `
+        <div class="ant-calendar-month-panel">
+          <button type="button" class="ant-calendar-month-panel-prev-year-btn">prev</button>
+          <span class="ant-calendar-month-panel-year-select-content">2026年</span>
+          <button type="button" class="ant-calendar-month-panel-next-year-btn">next</button>
+          <div class="months"></div>
+        </div>`;
+      const yearNode = panel.querySelector(".ant-calendar-month-panel-year-select-content");
+      const renderMonths = () => {
+        panel.querySelector(".months").innerHTML = Array.from({ length: 12 }, (_, index) => `
+          <span class="ant-calendar-month-panel-cell">
+            <button type="button" class="ant-calendar-month-panel-month" data-month="${index + 1}">${index + 1}月</button>
+          </span>`).join("");
+      };
+      panel.querySelector(".ant-calendar-month-panel-prev-year-btn").onclick = () => {
+        yearNode.textContent = `${Number(yearNode.textContent.match(/\d+/)[0]) - 1}年`;
+      };
+      panel.querySelector(".ant-calendar-month-panel-next-year-btn").onclick = () => {
+        yearNode.textContent = `${Number(yearNode.textContent.match(/\d+/)[0]) + 1}年`;
+      };
+      panel.addEventListener("click", event => {
+        const month = event.target.closest("[data-month]")?.dataset.month;
+        if (!month) return;
+        input.value = `${yearNode.textContent.match(/\d+/)[0]}-${String(month).padStart(2, "0")}`;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        panel.remove();
+      });
+      renderMonths();
+      document.body.append(panel);
+    }
+
+    function dateControl() {
+      const root = document.createElement("div");
+      root.className = "bili-date";
+      [0, 1].forEach(index => {
+        const picker = document.createElement("span");
+        picker.className = "ant-calendar-picker";
+        const input = document.createElement("input");
+        input.className = "ant-calendar-picker-input ant-input";
+        input.placeholder = index ? "结束月份" : "开始月份";
+        input.readOnly = true;
+        picker.append(input);
+        picker.addEventListener("click", () => openMonthPanel(input));
+        root.append(picker);
+        if (!index) root.append(document.createTextNode("至"));
+      });
+      const current = document.createElement("label");
+      current.className = "tonow";
+      current.innerHTML = '<input type="checkbox">至今';
+      root.append(current);
+      return root;
+    }
+
+    function createRecord(type) {
+      const record = document.createElement("div");
+      record.className = "bili-form-multiple";
+      record.innerHTML = '<div class="bili-form-multiple-tag">01</div>';
+      if (type === "work") {
+        record.append(formItem("公司名称", textControl("请输入公司名称")));
+        record.append(formItem("起止时间", dateControl()));
+        record.append(formItem("职位名称", textControl("请输入职位名称")));
+        record.append(formItem("工作描述", textControl("请输入工作描述", true)));
+      } else {
+        record.append(formItem("项目名称", textControl("请输入项目名称")));
+        record.append(formItem("起止时间", dateControl()));
+        record.append(formItem("项目角色", textControl("请输入项目角色")));
+        record.append(formItem("项目描述", textControl("请输入项目描述", true)));
+        record.append(formItem("项目链接", textControl("请输入项目链接")));
+      }
+      document.querySelector(`[data-records="${type}"]`).append(record);
+    }
+
+    document.querySelectorAll("[data-add]").forEach(button => {
+      button.addEventListener("click", () => {
+        button.dataset.clicks = String(Number(button.dataset.clicks || 0) + 1);
+        createRecord(button.dataset.add);
+      });
+    });
+    createRecord("work");
+    createRecord("projects");
+  </script>
+  <script src="../content.js"></script>
+  <script>
+    window.runBilibiliFixture = async () => {
+      const response = await window.__jianfillTest.fillCurrentFrame("supplement");
+      const values = (section, selector) => [
+        ...document.querySelectorAll(`${section} .bili-form-multiple ${selector}`)
+      ].map(control => control.value);
+      const result = {
+        response,
+        workAddClicks: Number(document.querySelector('[data-add="work"]').dataset.clicks || 0),
+        projectAddClicks: Number(document.querySelector('[data-add="projects"]').dataset.clicks || 0),
+        workCompanies: values("#resume实习\\/工作经历", 'input[placeholder="请输入公司名称"]'),
+        workPositions: values("#resume实习\\/工作经历", 'input[placeholder="请输入职位名称"]'),
+        workDates: [...document.querySelectorAll("#resume实习\\/工作经历 .bili-date")]
+          .map(root => [...root.querySelectorAll(".ant-calendar-picker-input")].map(input => input.value)),
+        workDescriptions: values("#resume实习\\/工作经历", 'textarea[placeholder="请输入工作描述"]'),
+        projectNames: values("#resume项目经历", 'input[placeholder="请输入项目名称"]'),
+        projectRoles: values("#resume项目经历", 'input[placeholder="请输入项目角色"]'),
+        projectDates: [...document.querySelectorAll("#resume项目经历 .bili-date")]
+          .map(root => [...root.querySelectorAll(".ant-calendar-picker-input")].map(input => input.value)),
+        projectDescriptions: values("#resume项目经历", 'textarea[placeholder="请输入项目描述"]'),
+        projectLinks: values("#resume项目经历", 'input[placeholder="请输入项目链接"]')
+      };
+      result.pass =
+        result.workAddClicks === 1 &&
+        result.projectAddClicks === 1 &&
+        result.workCompanies.join("|") === "甲公司|乙公司" &&
+        result.workPositions.join("|") === "产品实习生|策略实习生" &&
+        result.workDates.flat().join("|") === "2024-03|2024-08|2025-01|2025-06" &&
+        result.workDescriptions.join("|") === "负责需求分析|负责策略迭代" &&
+        result.projectNames.join("|") === "项目甲|项目乙" &&
+        result.projectRoles.join("|") === "产品负责人|核心成员" &&
+        result.projectDates.flat().join("|") === "2023-05|2023-11|2024-01|2024-09" &&
+        result.projectDescriptions[0] === "项目背景\n本人职责\n项目成果" &&
+        result.projectDescriptions[1] === "项目内容乙\n职责乙\n成果乙" &&
+        result.projectLinks[0] === "https://example.invalid/project-a";
+      document.querySelector("#result").textContent = JSON.stringify(result, null, 2);
+      return result;
+    };
+
+    document.querySelector("#run-fixture").addEventListener("click", () => {
+      window.runBilibiliFixture().catch(error => {
+        document.querySelector("#result").textContent = JSON.stringify({ error: error.message });
+      });
+    });
+  </script>
+</body>
+</html>

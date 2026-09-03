@@ -7,6 +7,16 @@
   <link rel="stylesheet" href="manager.css">
 </head>
 <body>
+  <svg class="icon-sprite" aria-hidden="true">
+    <symbol id="icon-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9"/><path d="M9 20v-7h6v7"/></symbol>
+    <symbol id="icon-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></symbol>
+    <symbol id="icon-progress" viewBox="0 0 24 24"><path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-7"/><path d="M22 19H2"/></symbol>
+    <symbol id="icon-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="icon-school" viewBox="0 0 24 24"><path d="m2 10 10-5 10 5-10 5z"/><path d="M6 12v5c3 2 9 2 12 0v-5"/><path d="M22 10v6"/></symbol>
+    <symbol id="icon-files" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4z"/><path d="M8 6h4M8 10h4M8 14h3"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2v-2"/></symbol>
+    <symbol id="icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.2.37.55.72 1 .9.22.1.46.14.7.14H21v4h-.09A1.7 1.7 0 0 0 19.4 15z"/></symbol>
+    <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  </svg>
   <div class="app-shell" id="appShell">
     <aside class="sidebar">
       <div class="sidebar-head">
@@ -14,16 +24,16 @@
           <span>简</span>
           <div class="brand-copy"><b>简填</b><small>网申资料管理</small></div>
         </div>
-        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="折叠侧栏" title="折叠侧栏">‹</button>
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="折叠侧栏" title="折叠侧栏"><svg><use href="#icon-chevron"></use></svg></button>
       </div>
       <nav id="nav" aria-label="主导航">
-        <button data-tab="home" class="active" title="概览"><span class="nav-icon">⌂</span><span class="nav-label">概览</span></button>
-        <button data-tab="mail" title="邮件待办"><span class="nav-icon">邮</span><span class="nav-label">邮件待办</span></button>
-        <button data-tab="progress" title="投递进展"><span class="nav-icon">进</span><span class="nav-label">投递进展</span></button>
-        <button data-tab="profile" title="个人资料"><span class="nav-icon">人</span><span class="nav-label">个人资料</span></button>
-        <button data-tab="growth" title="教育背景"><span class="nav-icon">学</span><span class="nav-label">教育背景</span></button>
-        <button data-tab="versions" title="简历版本"><span class="nav-icon">版</span><span class="nav-label">简历版本</span></button>
-        <button data-tab="api" title="设置"><span class="nav-icon">设</span><span class="nav-label">设置</span></button>
+        <button data-tab="home" class="active" title="概览"><span class="nav-icon"><svg><use href="#icon-home"></use></svg></span><span class="nav-label">概览</span></button>
+        <button data-tab="mail" title="邮件待办"><span class="nav-icon"><svg><use href="#icon-mail"></use></svg></span><span class="nav-label">邮件待办</span></button>
+        <button data-tab="progress" title="投递进展"><span class="nav-icon"><svg><use href="#icon-progress"></use></svg></span><span class="nav-label">投递进展</span></button>
+        <button data-tab="profile" title="个人资料"><span class="nav-icon"><svg><use href="#icon-user"></use></svg></span><span class="nav-label">个人资料</span></button>
+        <button data-tab="growth" title="教育背景"><span class="nav-icon"><svg><use href="#icon-school"></use></svg></span><span class="nav-label">教育背景</span></button>
+        <button data-tab="versions" title="简历版本"><span class="nav-icon"><svg><use href="#icon-files"></use></svg></span><span class="nav-label">简历版本</span></button>
+        <button data-tab="api" title="设置"><span class="nav-icon"><svg><use href="#icon-settings"></use></svg></span><span class="nav-label">设置</span></button>
       </nav>
       <div class="sidebar-foot"><span class="status-dot"></span><span class="nav-label">数据仅保存在本机</span></div>
     </aside>
@@ -75,7 +85,7 @@
       <div><span>待确认</span><strong id="mailReviewMetric">0</strong></div>
     </div>
     <div class="mail-filters">
-      <select id="mailStatusFilter"><option value="__default__">默认（隐藏已忽略）</option><option value="">全部状态</option><option>已写入</option><option>已完成</option><option>待确认</option><option>已忽略</option><option>失败</option></select>
+      <select id="mailStatusFilter"><option value="__default__">默认（隐藏已忽略）</option><option value="">全部状态</option><option>已写入</option><option>已完成</option><option>已挂</option><option>待确认</option><option>已忽略</option><option>失败</option></select>
       <select id="mailCategoryFilter"><option value="">全部分类</option><option>在线测评</option><option>ai面试</option><option>面试邀约</option></select>
       <select id="mailSort"><option value="received_desc">接收时间：最新优先</option><option value="received_asc">接收时间：最早优先</option><option value="deadline_asc">DDL：最早优先</option><option value="deadline_desc">DDL：最晚优先</option></select>
     </div>
@@ -166,7 +176,7 @@
 <section id="versions" class="section">
   <div class="surface">
     <div class="surface-head">
-      <div><span class="section-kicker">版本库</span><h2>简历版本</h2><p>新建空白版本，或从现有简历完整提取实习经历</p></div>
+      <div><h2>简历版本</h2></div>
       <div class="head-actions"><button class="btn secondary" id="showImport">导入简历新建</button><button class="btn primary" id="addVersion">新建空白版本</button></div>
     </div>
     <div id="versionList"></div>
@@ -174,11 +184,11 @@
   </div>
   <div class="surface import-panel hidden" id="importPanel">
     <div class="surface-head">
-      <div><span class="section-kicker">导入新版本</span><h2>解析实习经历</h2><p>完整保留业务背景、职责和成果原文，不总结、不合并。</p></div>
+      <div><h2>解析简历</h2></div>
       <button class="icon-btn" id="closeImport" type="button" aria-label="关闭导入面板">×</button>
     </div>
     <div class="upload-box">
-      <label class="file-drop" for="resumeFile"><span class="upload-icon">↑</span><strong id="fileName">选择 PDF、DOCX、TXT 或 Markdown 简历</strong><small>文件只在本机读取，文本将发送到你配置的 AI 服务解析</small></label>
+      <label class="file-drop" for="resumeFile"><span class="upload-icon">↑</span><strong id="fileName">选择 PDF、DOCX、TXT 或 Markdown 简历</strong></label>
       <input id="resumeFile" type="file" accept=".pdf,.docx,.md,.txt">
       <button class="btn primary" id="parseResume">读取并解析</button>
     </div>
@@ -190,39 +200,24 @@
   <div class="surface settings-card">
     <div class="surface-head">
       <div>
-        <span class="section-kicker">模型服务</span>
-        <h2>AI 解析与匹配</h2>
-        <p>支持配置多个 OpenAI-compatible 模型版本，按顺序启用和自动降级。</p>
+        <h2>AI 模型</h2>
       </div>
-      <button class="btn secondary" id="addAiProvider">添加模型版本</button>
-    </div>
-    <div class="rule-principles">
-      <span>按列表顺序调用</span>
-      <span>可单独启用 / 停用</span>
-      <span>限流或额度不足自动尝试下一个</span>
+      <button class="btn secondary" id="addAiProvider">添加模型</button>
     </div>
     <div id="aiProviderList"></div>
-    <div class="settings-actions"><span class="muted">保存模型时会申请对应 API 域名的访问权限；API Key 仅保存在本机。</span></div>
   </div>
   <div class="surface settings-card">
     <div class="surface-head">
       <div>
-        <span class="section-kicker">回答策略</span>
         <h2>AI 自动回答规则</h2>
-        <p>只使用你明确配置的事实与偏好；AI 仅识别网页问题，不推测答案。</p>
       </div>
       <button class="btn secondary" id="addAiRule">添加规则</button>
-    </div>
-    <div class="rule-principles">
-      <span>固定答案不发送给模型</span>
-      <span>低置信度不自动填写</span>
-      <span>不会自动勾选协议</span>
     </div>
     <div id="aiRuleList"></div>
   </div>
   <div class="surface settings-card">
     <div class="surface-head">
-      <div><span class="section-kicker">邮件配置</span><h2>126 / 163 IMAP</h2><p>使用邮箱客户端授权码，按设定周期查询收件箱。</p></div>
+      <div><h2>126 / 163 IMAP</h2></div>
     </div>
     <div class="form-grid">
       <div class="field"><label for="mailAddress">邮箱账号</label><input id="mailAddress" type="email" autocomplete="username" placeholder="填写 126 或 163 邮箱"></div>
@@ -233,7 +228,7 @@
   </div>
   <div class="surface settings-card">
     <div class="surface-head">
-      <div><span class="section-kicker">飞书写入</span><h2>目标多维表格</h2><p>唯一公司匹配后，仅更新 note、测评链接和 ddl。</p></div>
+      <div><h2>目标多维表格</h2></div>
     </div>
     <div class="form-grid">
       <div class="field"><label for="mailFeishuAppId">App ID</label><input id="mailFeishuAppId" autocomplete="off"></div>
@@ -255,35 +250,38 @@
       </div>
     </details>
   </div>
+  <div class="surface settings-card data-migration-card">
+    <div class="surface-head"><div><h2>数据迁移</h2></div></div>
+    <div class="migration-actions">
+      <button class="btn primary" id="exportDataBackup">导出 JSON</button>
+      <label class="btn secondary" for="importDataBackup">导入 JSON</label>
+      <input id="importDataBackup" type="file" accept=".json,application/json">
+    </div>
+  </div>
   <div class="surface settings-card">
     <div class="surface-head">
-      <div><span class="section-kicker">邮件运行方式</span><h2>同步与模型</h2><p id="mailAiSummary">读取现有 AI 设置中…</p></div>
+      <div><h2>邮件运行方式</h2></div>
     </div>
     <div class="sync-preferences">
       <label class="switch-row"><input id="mailAutoSync" type="checkbox"><span><b>启用自动同步</b><small>仅在浏览器运行期间触发</small></span></label>
       <div class="field"><label for="mailSyncIntervalHours">自动同步间隔（小时）</label><input id="mailSyncIntervalHours" type="number" min="0.5" max="168" step="0.5" value="12"></div>
       <div class="field"><label for="mailLookbackHours">邮件捕捉周期（小时）</label><input id="mailLookbackHours" type="number" min="1" max="720" step="1" value="24"></div>
     </div>
-    <div class="settings-actions">
-      <span class="muted">账号、授权码和飞书配置保存在本机浏览器。</span>
-      <button class="btn primary" id="saveMailSettings">保存邮件设置</button>
-    </div>
+    <div class="settings-actions"><span></span><button class="btn primary" id="saveMailSettings">保存邮件设置</button></div>
   </div>
-  <div class="surface native-install-card">
+  <div class="surface settings-card native-install-card">
     <div class="surface-head">
-      <div><span class="section-kicker">一次性安装</span><h2>本地桥接</h2><p>扩展需要 Native Messaging 才能访问 IMAP。安装后日常使用无需终端。</p></div>
+      <div><h2>本地桥接</h2></div>
+      <div class="native-platform-switch" role="tablist" aria-label="选择本地桥接系统">
+        <button type="button" data-native-platform="macos" role="tab">macOS</button>
+        <button type="button" data-native-platform="windows" role="tab">Windows</button>
+      </div>
     </div>
-    <div class="native-platform-switch" role="tablist" aria-label="选择本地桥接系统">
-      <button type="button" data-native-platform="macos" role="tab">macOS</button>
-      <button type="button" data-native-platform="windows" role="tab">Windows</button>
-    </div>
-    <p class="native-platform-hint" id="nativePlatformHint"></p>
     <div class="install-command"><code id="mailInstallCommand"></code><button class="btn ghost small" id="copyMailInstall">复制</button></div>
-    <div class="settings-actions">
-      <span class="muted" id="localConfigStatus">运行安装脚本后，可从 native-host/.env 导入配置。</span>
+    <div class="native-install-actions">
+      <span id="localConfigStatus" aria-live="polite"></span>
       <button class="btn secondary" id="importLocalConfig">导入本地配置</button>
     </div>
-    <p class="muted native-install-doc"><a href="https://github.com/QWE38qwe/resume-autofill-cn/blob/main/docs/MAIL_SYNC_SETUP.md" target="_blank" rel="noopener">查看邮件同步与系统安装说明 ↗</a></p>
   </div>
 </section>
     </main>

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Education fields fixture</title>
+  <style>
+    body { font: 16px sans-serif; }
+    section, label { display: block; margin: 16px; }
+    input, select { min-width: 240px; padding: 8px; }
+  </style>
+</head>
+<body>
+  <section>
+    <h2>教育经历</h2>
+    <div class="education-record">
+      <label>学校名称<input placeholder="请输入学校名称"></label>
+      <label>专业名称<input placeholder="请输入专业名称"></label>
+      <label>专业综合排名
+        <select>
+          <option value="">请选择</option>
+          <option value="top5">前 5%</option>
+          <option value="top10">前10%（含）</option>
+          <option value="top20">前 20%</option>
+        </select>
+      </label>
+      <label>是否双学位
+        <select>
+          <option value="">请选择</option>
+          <option value="yes">是</option>
+          <option value="no">否</option>
+        </select>
+      </label>
+      <label>是否为MBA
+        <select>
+          <option value="">请选择</option>
+          <option value="yes">是</option>
+          <option value="no">否</option>
+        </select>
+      </label>
+    </div>
+  </section>
+  <button id="run-fixture" type="button">运行夹具</button>
+  <pre id="result">not-run</pre>
+
+  <script>
+    let contentListener;
+    const fixtureStore = {
+      personal: {},
+      education: [{
+        school: "示例大学",
+        major: "信息管理",
+        rank: "Top 10%",
+        doubleDegree: "有",
+        mba: "false"
+      }],
+      profiles: [{ id: "fixture-profile", name: "教育测试", work: [] }],
+      activeProfileId: "fixture-profile",
+      projects: [],
+      languages: [],
+      skills: [],
+      awards: [],
+      papers: [],
+      certificates: [],
+      portfolio: [],
+      customFields: [],
+      settings: {}
+    };
+    window.chrome = {
+      storage: {
+        local: {
+          get: async keys => Object.fromEntries(keys.map(key => [key, fixtureStore[key]]))
+        }
+      },
+      runtime: {
+        sendMessage: async () => ({ matches: [], source: "disabled" }),
+        onMessage: { addListener: listener => { contentListener = listener; } }
+      }
+    };
+  </script>
+  <script src="../content.js"></script>
+  <script>
+    document.querySelector("#run-fixture").addEventListener("click", () => {
+      contentListener({ type: "FILL_FORM", mode: "supplement" }, {}, response => {
+        const selects = [...document.querySelectorAll("select")].map(select => select.value);
+        const result = {
+          response,
+          rank: selects[0],
+          doubleDegree: selects[1],
+          mba: selects[2],
+          pass: selects.join("|") === "top10|yes|no"
+        };
+        document.querySelector("#result").textContent = JSON.stringify(result, null, 2);
+      });
+    });
+  </script>
+</body>
+</html>

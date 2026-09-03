@@ -1,5 +1,7 @@
 (() => {
   const demoRequested = new URLSearchParams(location.search).get("demo") === "1";
+  const modelDemoRequested = new URLSearchParams(location.search).get("models") === "1";
+  const emptyProfileRequested = new URLSearchParams(location.search).get("empty") === "1";
   if (!demoRequested && globalThis.chrome?.runtime?.id) return;
 
   const profiles = [{
@@ -22,13 +24,13 @@
   }];
 
   const demoStore = {
-    personal: {
+    personal: emptyProfileRequested ? {} : {
       name: "示例用户",
       expectedRole: "产品经理",
       expectedCity: "上海",
       drivingLicense: "否"
     },
-    education: [
+    education: emptyProfileRequested ? [] : [
       {
         school: "示例大学",
         college: "管理学院",
@@ -64,6 +66,35 @@
     portfolio: [],
     hobbies: "阅读、设计",
     customFields: [],
+    mailHistory: [
+      {
+        messageId: "mail-demo-1",
+        status: "已写入",
+        company: "小鹏集团",
+        subject: "视频面试邀约",
+        category: "面试邀约",
+        deadline: "2026-09-07 18:00",
+        receivedAt: "2026-09-03T13:32:00+08:00",
+        assessmentUrl: "https://example.com/interview",
+        customNote: "准备产品案例"
+      },
+      {
+        messageId: "mail-demo-2",
+        status: "已挂",
+        company: "示例科技",
+        subject: "招聘流程更新",
+        category: "流程结束",
+        deadline: "",
+        receivedAt: "2026-09-03T10:15:00+08:00",
+        assessmentUrl: "",
+        customNote: ""
+      }
+    ],
+    mailSyncStatus: {
+      state: "success",
+      finishedAt: "2026-09-03T14:25:00+08:00",
+      summary: { fetched: 15, updated: 3, irrelevant: 9, alreadyProcessed: 2, needsReview: 1 }
+    },
     fillHistory: [
       {
         company: "星河科技",
@@ -95,7 +126,27 @@
       model: "deepseek-chat",
       apiKey: "",
       apiConfigured: false,
-      aiRules: []
+      aiRules: [],
+      aiProviders: modelDemoRequested ? [
+        {
+          id: "demo-primary",
+          name: "DeepSeek 主力",
+          apiBase: "https://api.example.invalid/v1",
+          model: "deepseek-chat",
+          apiKey: "fixture-key",
+          enabled: true,
+          order: 0
+        },
+        {
+          id: "demo-backup",
+          name: "备用模型",
+          apiBase: "https://backup.example.invalid/v1",
+          model: "fallback-model",
+          apiKey: "fixture-key",
+          enabled: false,
+          order: 1
+        }
+      ] : []
     }
   };
 
@@ -116,14 +167,22 @@
   globalThis.chrome = {
     runtime: {
       id: "",
-      getManifest: () => ({ version: "0.9.1" }),
-      getURL: path => new URL(`../${path}`, location.href).href,
-      sendMessage: async () => ({})
+      getManifest: () => ({ version: "0.19.1" }),
+      getURL: path => demoRequested && path.includes("local-config.json")
+        ? new URL("../__missing_local_config__.json", location.href).href
+        : new URL(`../${path}`, location.href).href,
+      sendMessage: async message => (
+        message?.type === "MAIL_SETTINGS_CHANGED" ||
+        message?.type === "DATA_SYNC_SETTINGS_CHANGED"
+          ? { ok: true }
+          : {}
+      )
     },
     storage: {
       local: {
         get: async keys => selectStore(keys),
-        set: async values => Object.assign(demoStore, values)
+        set: async values => Object.assign(demoStore, values),
+        clear: async () => Object.keys(demoStore).forEach(key => delete demoStore[key])
       },
       onChanged: { addListener: () => {} }
     },

@@ -76,7 +76,8 @@ const schemas = {
   education: [
     ["school", "学校"], ["college", "学院"], ["major", "专业"], ["level", "学历"],
     ["degree", "学位"], ["type", "学习形式"], ["start", "开始时间"], ["end", "结束时间"],
-    ["current", "是否至今"], ["city", "学校所在城市"],
+    ["current", "是否至今"], ["doubleDegree", "是否双学位"], ["mba", "是否MBA"],
+    ["city", "学校所在城市"],
     ["gpa", "GPA"], ["rank", "专业排名"], ["courses", "专业课程"], ["research", "研究方向"],
     ["thesis", "毕业论文"], ["mentor", "导师"]
   ],
@@ -113,7 +114,7 @@ const basicGroups = [
       ["name", "姓名"], ["englishName", "英文姓名"], ["gender", "性别"], ["birthDate", "出生日期"],
       ["age", "年龄"], ["nationality", "国家/地区"], ["ethnicity", "民族"], ["politics", "政治面貌"],
       ["maritalStatus", "婚姻状况"], ["health", "健康状况"], ["height", "身高"], ["weight", "体重"],
-      ["phoneCountryCode", "电话区号"], ["phone", "手机号"],
+      ["phone", "手机号"],
       ["email", "邮箱"], ["wechat", "微信"], ["qq", "QQ"]
     ]
   },
@@ -156,7 +157,7 @@ const basicGroups = [
     title: "链接与作品",
     fields: [
       ["linkedin", "LinkedIn"], ["github", "GitHub"], ["personalWebsite", "个人网站"],
-      ["portfolioUrl", "作品集链接"], ["resumeAttachment", "简历附件文件名"]
+      ["portfolioUrl", "作品集链接"]
     ]
   }
 ];
@@ -170,6 +171,7 @@ let modalCtx = null;
 let openedVersionId = null;
 let parsedDraft = null;
 let progressCatalogPromise = null;
+let mailNoteTimer = null;
 
 function activateTab(tab) {
   $$("#nav button").forEach(button => button.classList.toggle("active", button.dataset.tab === tab));
@@ -225,6 +227,7 @@ async function init() {
   renderHistoryFilters();
   renderHistory();
   renderMailSettings();
+  await disableLegacyDataSync();
   if (localConfigResult?.ok && $("#localConfigStatus")) {
     $("#localConfigStatus").dataset.touched = "1";
     $("#localConfigStatus").textContent = "已从本地 .env 导入邮件、飞书和模型配置。";
@@ -594,6 +597,7 @@ function openRecord(type, index) {
   modalCtx = { type, index };
   const record = index < 0 ? {} : db[type][index];
   const longFields = ["content", "duty", "result", "description", "courses"];
+  const yesNoFields = new Set(["doubleDegree", "mba"]);
   $("#modalBody").innerHTML = `
     <div class="section-title">${index < 0 ? "添加" : "编辑"}记录</div>
     <div class="modal-grid">
@@ -602,7 +606,9 @@ function openRecord(type, index) {
           <label>${label}</label>
           ${longFields.includes(key)
             ? `<textarea data-field="${key}" rows="4">${safe(record[key])}</textarea>`
-            : `<input data-field="${key}" value="${safe(record[key])}">`}
+            : yesNoFields.has(key)
+              ? `<select data-field="${key}"><option value="">请选择</option><option value="是" ${record[key] === "是" ? "selected" : ""}>是</option><option value="否" ${record[key] === "否" ? "selected" : ""}>否</option></select>`
+              : `<input data-field="${key}" value="${safe(record[key])}">`}
         </div>
       `).join("")}
     </div>
@@ -659,14 +665,11 @@ function renderVersions() {
         <div class="record-title">
           <div>
             <strong>${safe(profile.name)} ${isDefault ? '<span class="field-chip matched">默认</span>' : ""}</strong>
-            <div class="muted">实习 ${profile.work?.length || 0} 段｜简历附件 ${safe(profileResumeFileName(profile) || "未绑定")}</div>
           </div>
           <div class="record-actions">
-            <button class="btn primary small" data-open-version="${profile.id}">${openedVersionId === profile.id ? "收起" : "编辑"}</button>
             ${isDefault ? "" : `<button class="btn ghost small" data-default-version="${profile.id}">设为默认</button>`}
+            <button class="btn primary small" data-open-version="${profile.id}">${openedVersionId === profile.id ? "收起" : "编辑"}</button>
             <button class="btn ghost small" data-copy-version="${profile.id}">复制</button>
-            <button class="btn ghost small" data-rename="${profile.id}">重命名</button>
-            <button class="btn ghost small danger-btn" data-del-version="${profile.id}">删除</button>
           </div>
         </div>
       </div>
@@ -681,12 +684,6 @@ function renderVersions() {
   });
   $$("[data-copy-version]").forEach(button => {
     button.onclick = () => copyVersion(button.dataset.copyVersion);
-  });
-  $$("[data-rename]").forEach(button => {
-    button.onclick = () => renameVersion(button.dataset.rename);
-  });
-  $$("[data-del-version]").forEach(button => {
-    button.onclick = () => deleteVersion(button.dataset.delVersion);
   });
 }
 
@@ -708,7 +705,7 @@ function openVersion(id) {
   $("#versionEditor").innerHTML = `
     <div class="version-editor">
       <div class="surface-head">
-        <div><span class="section-kicker">版本编辑</span><h2>${safe(profile.name)} / 实习经历</h2><p>工作内容逐条完整显示，不做省略。</p></div>
+        <div><h2>${safe(profile.name)}</h2></div>
         <div class="head-actions"><button class="btn secondary" id="collapseVersion">收起</button><button class="btn primary" id="addWork">添加经历</button></div>
       </div>
       <div class="form-grid">
@@ -735,7 +732,7 @@ function openVersion(id) {
         <div class="section-kicker">自我评价</div>
         <textarea id="vSummary" rows="4" placeholder="填写该版本专属的自我评价">${safe(profile.summary)}</textarea>
       </div>
-      <div class="settings-actions"><span></span><button class="btn primary" id="saveVersionBase">保存版本</button></div>
+      <div class="settings-actions"><button class="btn ghost danger-btn" id="deleteVersionFromEditor">删除版本</button><button class="btn primary" id="saveVersionBase">保存版本</button></div>
     </div>
   `;
   renderWork(profile);
@@ -775,6 +772,7 @@ function openVersion(id) {
       toast("简历附件已移除");
     };
   }
+  $("#deleteVersionFromEditor").onclick = () => deleteVersion(id);
   $("#saveVersionBase").onclick = async () => {
     const name = $("#vName").value.trim();
     if (!name) return $("#vName").focus();
@@ -1405,6 +1403,143 @@ function mailSettingsDefaults() {
   };
 }
 
+function backupFileName(prefix = "简填备份") {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `${prefix}_${timestamp}.json`;
+}
+
+function downloadTextFile(text, fileName) {
+  const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function disableLegacyDataSync() {
+  const settings = {
+    ...(db.dataSyncSettings || {}),
+    enabled: false,
+    passphrase: ""
+  };
+  db.dataSyncSettings = settings;
+  await chrome.storage.local.set({ dataSyncSettings: settings });
+  await chrome.runtime.sendMessage({
+    type: "DATA_SYNC_SETTINGS_CHANGED",
+    dataSyncSettings: settings
+  }).catch(() => {});
+}
+
+function migrationPackage(storage) {
+  const excludedKeys = new Set([
+    "aiFieldMappings",
+    "companyNameMappings",
+    "dataSyncSettings",
+    "dataSyncState",
+    "mailSyncStatus",
+    "nativeHostPlatform",
+    "progressLoginTabs",
+    "progressMonitorStatus"
+  ]);
+  const data = Object.fromEntries(
+    Object.entries(storage || {})
+      .filter(([key]) => !excludedKeys.has(key))
+      .map(([key, value]) => [key, value])
+  );
+  return {
+    format: "jianfill-data-migration",
+    version: 1,
+    createdAt: new Date().toISOString(),
+    appVersion: chrome.runtime.getManifest().version,
+    data
+  };
+}
+
+async function downloadMigrationBackup(prefix = "简填数据") {
+  const storage = await chrome.storage.local.get(null);
+  const payload = migrationPackage(storage);
+  downloadTextFile(JSON.stringify(payload, null, 2), backupFileName(prefix));
+  return payload;
+}
+
+function parseMigrationPackage(text) {
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    throw new Error("JSON 文件格式无效");
+  }
+  if (payload?.format === "jianfill-encrypted-backup") {
+    throw new Error("这是旧版加密备份，请先使用旧版扩展解密后再导出");
+  }
+  const data = payload?.format === "jianfill-data-migration" ? payload.data : payload;
+  if (!data || Array.isArray(data) || typeof data !== "object") {
+    throw new Error("JSON 中没有可导入的数据");
+  }
+  return data;
+}
+
+async function replaceLocalStorage(data, preserved) {
+  const previous = await chrome.storage.local.get(null);
+  try {
+    await chrome.storage.local.clear();
+    await chrome.storage.local.set({ ...data, ...preserved });
+  } catch (error) {
+    await chrome.storage.local.clear();
+    await chrome.storage.local.set(previous);
+    throw new Error(`导入失败，已恢复原数据：${error.message || error}`);
+  }
+}
+
+async function rescheduleAfterRestore() {
+  const storage = await chrome.storage.local.get(["mailSettings"]);
+  const mailResult = await chrome.runtime.sendMessage({
+    type: "MAIL_SETTINGS_CHANGED",
+    mailSettings: storage.mailSettings || {}
+  });
+  if (!mailResult?.ok) throw new Error(mailResult?.error || "邮件任务重新调度失败");
+}
+
+function setMigrationBusy(busy, activeButton = null) {
+  ["#exportDataBackup", "#importDataBackup"].forEach(selector => {
+    const node = $(selector);
+    if (node) node.disabled = busy;
+  });
+  const importLabel = document.querySelector('label[for="importDataBackup"]');
+  if (importLabel) {
+    importLabel.classList.toggle("disabled", busy);
+    importLabel.setAttribute("aria-disabled", String(busy));
+  }
+  if (activeButton) activeButton.dataset.busy = busy ? "1" : "";
+}
+
+async function importDataBackup(file) {
+  if (!file) return;
+  if (file.size > 20 * 1024 * 1024) throw new Error("备份文件不能超过 20MB");
+  const text = await file.text();
+  const data = parseMigrationPackage(text);
+  if (!confirm("导入会覆盖当前设备的数据，并先自动导出一份回滚 JSON。确认继续？")) {
+    return;
+  }
+  await downloadMigrationBackup("简填导入前回滚");
+  await replaceLocalStorage(data, {
+    dataSyncSettings: { enabled: false, passphrase: "" },
+    dataSyncState: { state: "idle" },
+    ...(db.nativeHostPlatform ? { nativeHostPlatform: db.nativeHostPlatform } : {})
+  });
+  try {
+    await rescheduleAfterRestore();
+  } catch (error) {
+    throw new Error(`数据已导入，但后台任务重新调度失败：${error.message || error}`);
+  }
+  toast("数据已导入，页面即将刷新", "success");
+  setTimeout(() => location.reload(), 500);
+}
+
 function detectedNativeHostPlatform() {
   const value = String(navigator.userAgentData?.platform || navigator.platform || "");
   return /win/i.test(value) ? "windows" : "macos";
@@ -1421,13 +1556,9 @@ function renderNativeHostPlatform(platform = db.nativeHostPlatform || detectedNa
   if (selected === "windows") {
     $("#mailInstallCommand").textContent =
       `powershell -ExecutionPolicy Bypass -File .\\native-host\\install-windows.ps1 -ExtensionId ${chrome.runtime.id}`;
-    $("#nativePlatformHint").textContent =
-      "在源码根目录运行。Windows 11 x64：安装到 %LOCALAPPDATA%\\Jianfill\\MailHost，注册当前用户的 Chrome / Edge，登录态密钥由 DPAPI 保护。";
   } else {
     $("#mailInstallCommand").textContent =
       `./native-host/install.sh ${chrome.runtime.id}`;
-    $("#nativePlatformHint").textContent =
-      "在源码根目录运行。macOS：安装到 ~/Library/Application Support/Jianfill Mail Host，注册 Chrome / Edge，登录态密钥保存在 Keychain。";
   }
 }
 
@@ -1460,16 +1591,10 @@ function renderMailSettings() {
   $("#mailLookbackHours").value = settings.lookbackHours;
   $("#mailLookbackLabel").textContent = `最近 ${settings.lookbackHours} 小时`;
 
-  const providers = activeAiProviders();
-  $("#mailAiSummary").textContent = providers.length
-    ? `共用 ${providers.length} 个启用模型 · 优先 ${providers[0].name || providers[0].model}`
-    : "尚未启用 AI 模型版本，邮件同步前请先完成设置。";
   renderNativeHostPlatform();
   const localStatus = $("#localConfigStatus");
   if (localStatus && !localStatus.dataset.touched) {
-    localStatus.textContent = db.nativeHostPlatform === "windows"
-      ? "PowerShell 安装后，可通过 Native Host 导入本地 .env 配置。"
-      : "运行 zsh 安装脚本后，可从 native-host/.env 导入配置。";
+    localStatus.textContent = "";
   }
   updateBridgeState("idle", "检测本地桥接");
 }
@@ -1609,6 +1734,7 @@ function renderProgressMonitor() {
 
 function mailStatusClass(status) {
   if (status === "已写入" || status === "将写入" || status === "已完成") return "matched";
+  if (status === "已挂") return "hung";
   if (status === "待确认") return "unmatched";
   if (status === "失败") return "danger";
   return "skipped";
@@ -1674,7 +1800,7 @@ function renderMailDashboard() {
   $("#mailHistoryTable").innerHTML = `
     <div class="mail-table-wrap">
       <table class="mail-table">
-        <thead><tr><th>状态</th><th>公司</th><th>邮件标题</th><th>分类</th><th>DDL</th><th>接收时间</th><th>操作</th></tr></thead>
+        <thead><tr><th>状态</th><th>公司</th><th>邮件标题</th><th>分类</th><th>DDL</th><th>接收时间</th><th>自定义备注</th><th>操作</th></tr></thead>
         <tbody>
           ${rows.map(item => {
             const link = httpUrl(item.assessmentUrl);
@@ -1686,11 +1812,12 @@ function renderMailDashboard() {
                 <td>${item.category ? `<span class="mail-category">${safe(item.category)}</span>` : '<span class="cell-empty">—</span>'}</td>
                 <td>${item.deadline ? `<time>${safe(item.deadline)}</time>` : '<span class="cell-empty">—</span>'}</td>
                 <td><time>${safe(formatMailTime(item.receivedAt))}</time></td>
+                <td><input class="mail-note" data-message-id="${safeAttr(item.messageId)}" value="${safeAttr(item.customNote || "")}" placeholder="添加备注" aria-label="自定义备注"></td>
                 <td><div class="mail-actions">
                   ${link
                     ? `<a class="mail-open" href="${safeAttr(link)}" target="_blank" rel="noopener">打开链接 ↗</a>`
                     : '<span class="mail-open is-disabled" aria-disabled="true">打开链接</span>'}
-                  <select class="mail-action" data-message-id="${safeAttr(item.messageId)}" aria-label="修改邮件状态"><option value="">修改状态</option><option value="completed">已完成</option><option value="ignored">已忽略</option><option value="confirm_write">确认写入</option></select>
+                  <select class="mail-action" data-message-id="${safeAttr(item.messageId)}" aria-label="修改邮件状态"><option value="">修改状态</option><option value="completed">已完成</option><option value="hung">已挂</option><option value="ignored">已忽略</option><option value="confirm_write">确认写入</option></select>
                 </div></td>
               </tr>
             `;
@@ -1713,6 +1840,32 @@ $("#saveMailSettings").addEventListener("click", async () => {
     await persistMailSettings();
   } catch (error) {
     alert(error.message || "保存失败");
+  }
+});
+
+$("#exportDataBackup").addEventListener("click", async () => {
+  setMigrationBusy(true, $("#exportDataBackup"));
+  try {
+    await downloadMigrationBackup();
+    toast("JSON 已导出", "success");
+  } catch (error) {
+    toast(error.message || "导出失败", "error");
+  } finally {
+    setMigrationBusy(false, $("#exportDataBackup"));
+  }
+});
+
+$("#importDataBackup").addEventListener("change", async event => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  setMigrationBusy(true);
+  try {
+    await importDataBackup(file);
+  } catch (error) {
+    toast(error.message || "导入失败", "error");
+  } finally {
+    event.target.value = "";
+    setMigrationBusy(false);
   }
 });
 
@@ -1888,9 +2041,31 @@ $("#goAiSettings")?.addEventListener("click", () => activateTab("api"));
 $("#mailStatusFilter").addEventListener("change", renderMailDashboard);
 $("#mailCategoryFilter").addEventListener("change", renderMailDashboard);
 $("#mailSort").addEventListener("change", renderMailDashboard);
+$("#mailHistoryTable").addEventListener("input", event => {
+  const input = event.target.closest(".mail-note");
+  if (!input) return;
+  clearTimeout(mailNoteTimer);
+  mailNoteTimer = setTimeout(async () => {
+    db.mailHistory = (db.mailHistory || []).map(item =>
+      item.messageId === input.dataset.messageId
+        ? { ...item, customNote: input.value.trim() }
+        : item
+    );
+    await chrome.storage.local.set({ mailHistory: db.mailHistory });
+  }, 350);
+});
 $("#mailHistoryTable").addEventListener("change", async event => {
   const select = event.target.closest(".mail-action");
   if (!select?.value) return;
+  if (select.value === "hung") {
+    db.mailHistory = (db.mailHistory || []).map(item =>
+      item.messageId === select.dataset.messageId ? { ...item, status: "已挂" } : item
+    );
+    await chrome.storage.local.set({ mailHistory: db.mailHistory });
+    renderMailDashboard();
+    toast("已标记为已挂", "success");
+    return;
+  }
   select.disabled = true;
   try {
     const result = await chrome.runtime.sendMessage({
@@ -1939,7 +2114,7 @@ $("#importLocalConfig").addEventListener("click", async () => {
     renderAiProviders();
     renderMailSettings();
     status.dataset.touched = "1";
-    status.textContent = "已导入本地配置，并明文显示在设置页。";
+    status.textContent = "已导入本地配置";
   } catch (error) {
     status.dataset.touched = "1";
     status.textContent = `导入失败：${error.message || error}`;
@@ -2005,21 +2180,37 @@ $("#parseResume").addEventListener("click", async () => {
   }
 
   const providers = activeAiProviders();
-  if (!providers.length) {
-    setParseStatus("请先在“设置”中启用至少一个模型版本，再执行解析", "error");
-    return;
-  }
-
   const button = $("#parseResume");
   button.disabled = true;
   try {
-    const permitted = await ensureProviderPermissions(providers);
-    if (!permitted) throw new Error("未获得 AI 服务域名的访问权限");
     setParseStatus("正在本地读取简历文本…");
     const text = await extractResumeText(file);
     if (text.trim().length < 30) throw new Error("没有读取到足够的简历文本，请确认文件不是扫描图片");
-    setParseStatus(`已读取 ${text.length.toLocaleString()} 个字符，正在逐条提取实习经历…`);
-    parsedDraft = await parseInternships(text, file.name, providers);
+    const localDraft = parseResumeLocally(text, file.name);
+    if (providers.length) {
+      const permitted = await ensureProviderPermissions(providers);
+      if (permitted) {
+        setParseStatus(`已读取 ${text.length.toLocaleString()} 个字符，正在提取简历信息…`);
+        try {
+          parsedDraft = {
+            ...(await parseInternships(text, file.name, providers)),
+            personal: localDraft.personal,
+            education: localDraft.education,
+            parseSource: "ai"
+          };
+        } catch (error) {
+          if (!localDraft.internships.length) throw error;
+          parsedDraft = localDraft;
+        }
+      } else {
+        parsedDraft = localDraft;
+      }
+    } else {
+      parsedDraft = localDraft;
+    }
+    if (!parsedDraft.internships.length) {
+      throw new Error("未识别到实习经历，请确认简历中包含起止时间和公司信息");
+    }
     try {
       parsedDraft.resumeFile = await serializeResumeFile(file);
     } catch (error) {
@@ -2028,12 +2219,12 @@ $("#parseResume").addEventListener("click", async () => {
     }
     renderParsedDraft();
     setParseStatus(
-      `解析完成：识别到 ${parsedDraft.internships.length} 段实习经历${parsedDraft.resumeFileWarning ? `；${parsedDraft.resumeFileWarning}` : "，原文件已绑定到该版本"}`,
+      `解析完成：识别到 ${parsedDraft.internships.length} 段实习经历${parsedDraft.parseSource === "local" ? "（本地解析）" : ""}${parsedDraft.resumeFileWarning ? `；${parsedDraft.resumeFileWarning}` : ""}`,
       parsedDraft.resumeFileWarning ? "" : "success"
     );
   } catch (error) {
     console.error(error);
-    setParseStatus(error.message || "解析失败，请检查文件和 API 设置", "error");
+    setParseStatus(error.message || "解析失败，请检查文件内容", "error");
   } finally {
     button.disabled = false;
   }
@@ -2112,6 +2303,128 @@ async function extractPdfText(buffer) {
     pages.push(lines.join("\n"));
   }
   return pages.join("\n\n");
+}
+
+function resumeTextLines(resumeText) {
+  return String(resumeText || "")
+    .replace(/\r/g, "")
+    .split(/\n+/)
+    .map(line => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+function normalizeResumeMonth(year, month) {
+  return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+function resumeDateRange(line) {
+  const match = String(line).match(
+    /((?:19|20)\d{2})\s*[./年-]\s*(\d{1,2})\s*月?\s*(?:-|—|–|~|～|至|到)\s*(?:(至今|现在|今)|((?:19|20)\d{2})\s*[./年-]\s*(\d{1,2})\s*月?)/i
+  );
+  if (!match) return null;
+  return {
+    source: match[0],
+    start: normalizeResumeMonth(match[1], match[2]),
+    end: match[3] ? "至今" : normalizeResumeMonth(match[4], match[5])
+  };
+}
+
+function resumeBasics(resumeText) {
+  const lines = resumeTextLines(resumeText);
+  const joined = lines.join("\n");
+  const email = joined.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || "";
+  const explicitName = joined.match(/(?:姓名|Name)\s*[：:]\s*([\u3400-\u9fff·]{2,8}|[A-Za-z][A-Za-z ]{1,30})/i)?.[1] || "";
+  const headingPattern = /^(个人信息|基本信息|教育经历|实习经历|工作经历|项目经历|求职意向|自我评价)$/;
+  const name = explicitName || lines.slice(0, 12).find(line =>
+    /^[\u3400-\u9fff·]{2,4}$/.test(line) && !headingPattern.test(line)
+  ) || "";
+  const schoolLine = lines.find(line =>
+    !/^(教育经历|学校|学院)$/.test(line) &&
+    /[\u3400-\u9fffA-Za-z·]{2,40}(?:大学|学院|学校)/.test(line) &&
+    line.length <= 80
+  ) || "";
+  const school = schoolLine.match(/[\u3400-\u9fffA-Za-z·]{2,40}(?:大学|学院|学校)/)?.[0] || "";
+  const explicitMajor = joined.match(/(?:专业|Major)\s*[：:]\s*([^\n|｜]{2,30})/i)?.[1]?.trim() || "";
+  const schoolParts = schoolLine.split(/\s*[|｜]\s*|\s{2,}/).filter(Boolean);
+  const major = explicitMajor || schoolParts.find(part =>
+    part !== school && !/本科|硕士|博士|学士|研究生|20\d{2}/.test(part)
+  ) || "";
+  return {
+    personal: { name: name.trim(), email: email.trim() },
+    education: school ? { school: school.trim(), major: major.trim() } : null
+  };
+}
+
+function internshipHeaderValues(line) {
+  const range = resumeDateRange(line);
+  const clean = String(line)
+    .replace(range?.source || "", " ")
+    .replace(/[|｜]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const companyPattern = /[\u3400-\u9fffA-Za-z0-9·（）()]{2,40}(?:公司|集团|银行|科技|研究院|实验室|事务所|中心|工作室)/;
+  const company = clean.match(companyPattern)?.[0] || "";
+  const parts = clean.split(/\s+/).filter(Boolean);
+  const position = parts.find(part =>
+    part !== company && /实习|产品|运营|开发|算法|设计|工程师|助理|经理|分析|研究/.test(part)
+  ) || (company ? clean.replace(company, "").trim() : parts[1] || "");
+  const department = parts.find(part => /部$|部门$|中心$/.test(part) && part !== company) || "";
+  return {
+    company: company || parts[0] || "",
+    department,
+    position
+  };
+}
+
+function localInternships(resumeText) {
+  const lines = resumeTextLines(resumeText);
+  const startIndex = lines.findIndex(line => /^(实习|工作)(经历|经验)/.test(line));
+  const sectionStart = startIndex >= 0 ? startIndex + 1 : 0;
+  const endOffset = lines.slice(sectionStart).findIndex(line =>
+    /^(教育|项目|校园|科研|技能|证书|获奖|荣誉|自我|个人|作品|论文).{0,8}$/.test(line)
+  );
+  const sectionEnd = endOffset >= 0 ? sectionStart + endOffset : lines.length;
+  const section = lines.slice(sectionStart, sectionEnd);
+  const dateIndexes = section
+    .map((line, index) => resumeDateRange(line) ? index : -1)
+    .filter(index => index >= 0);
+
+  return dateIndexes.map((dateIndex, entryIndex) => {
+    const line = section[dateIndex];
+    const range = resumeDateRange(line);
+    const lineWithoutDate = line.replace(range.source, "").replace(/[|｜]/g, " ").trim();
+    const previous = section[dateIndex - 1] || "";
+    const headerLine = lineWithoutDate || previous;
+    const header = internshipHeaderValues(`${headerLine} ${range.source}`);
+    const nextDateIndex = dateIndexes[entryIndex + 1] ?? section.length;
+    let body = section.slice(dateIndex + 1, nextDateIndex);
+    if (entryIndex < dateIndexes.length - 1 && !section[nextDateIndex].replace(resumeDateRange(section[nextDateIndex]).source, "").trim()) {
+      body = body.slice(0, -1);
+    }
+    const bullets = body
+      .filter(item => item !== headerLine && !/^(实习|工作)(经历|经验)/.test(item))
+      .map(item => item.replace(/^[•●▪◦·\-–—]\s*/, "").trim())
+      .filter(Boolean);
+    return normalizeInternship({
+      ...header,
+      type: "实习",
+      start: range.start,
+      end: range.end,
+      bullets
+    });
+  }).filter(work => work.company || work.position || work.description);
+}
+
+function parseResumeLocally(resumeText, fileName) {
+  const basics = resumeBasics(resumeText);
+  return {
+    versionName: fileName.replace(/\.[^.]+$/, ""),
+    attachment: fileName,
+    internships: localInternships(resumeText),
+    personal: basics.personal,
+    education: basics.education,
+    parseSource: "local"
+  };
 }
 
 function chatEndpoint(apiBase) {
@@ -2263,8 +2576,13 @@ function renderParsedDraft() {
     <div class="parse-preview">
       <div class="parse-preview-head">
         <div class="field"><label>新版本名称</label><input id="parsedVersionName" value="${safe(parsedDraft.versionName)}"></div>
-        <div class="field"><label>绑定附件</label><div class="resume-file-inline">${safe(parsedDraft.resumeFile?.name || parsedDraft.attachment || "未绑定")}</div></div>
         <button class="btn primary" id="createParsedVersion">确认并创建版本</button>
+      </div>
+      <div class="parsed-basics">
+        <div class="field"><label>姓名</label><input data-parsed-basic="name" value="${safe(parsedDraft.personal?.name || "")}"></div>
+        <div class="field"><label>邮箱</label><input data-parsed-basic="email" value="${safe(parsedDraft.personal?.email || "")}"></div>
+        <div class="field"><label>学校</label><input data-parsed-basic="school" value="${safe(parsedDraft.education?.school || "")}"></div>
+        <div class="field"><label>专业</label><input data-parsed-basic="major" value="${safe(parsedDraft.education?.major || "")}"></div>
       </div>
       ${parsedDraft.internships.map((work, index) => `
         <div class="parsed-work" data-parsed-work="${index}">
@@ -2312,6 +2630,15 @@ function readParsedWorkCards() {
   });
 }
 
+function readParsedBasics() {
+  return Object.fromEntries(
+    $$("[data-parsed-basic]").map(input => [
+      input.dataset.parsedBasic,
+      input.value.trim()
+    ])
+  );
+}
+
 async function createVersionFromParsed() {
   const name = $("#parsedVersionName").value.trim();
   if (!name) return $("#parsedVersionName").focus();
@@ -2333,13 +2660,36 @@ async function createVersionFromParsed() {
     openQuestions: []
   };
   const previousActiveProfileId = db.activeProfileId;
+  const previousPersonal = { ...(db.personal || {}) };
+  const previousEducation = [...(db.education || [])];
+  const basics = readParsedBasics();
+  db.personal = { ...(db.personal || {}) };
+  ["name", "email"].forEach(key => {
+    if (!String(db.personal[key] || "").trim() && basics[key]) db.personal[key] = basics[key];
+  });
+  if (!db.education.length && basics.school) {
+    db.education.push({
+      school: basics.school,
+      major: basics.major || ""
+    });
+  }
   db.profiles.push(profile);
   db.activeProfileId = profile.id;
   try {
-    await saveProfiles();
+    await chrome.storage.local.set({
+      profiles: db.profiles,
+      activeProfileId: db.activeProfileId,
+      personal: db.personal,
+      education: db.education
+    });
+    renderVersions();
+    renderBasic();
+    renderList("education");
   } catch (error) {
     db.profiles.pop();
     db.activeProfileId = previousActiveProfileId;
+    db.personal = previousPersonal;
+    db.education = previousEducation;
     setParseStatus("版本保存失败；可能是本地存储空间不足", "error");
     return;
   }
@@ -2378,52 +2728,25 @@ function renderAiProviders() {
   db.settings.aiProviders = providers;
   box.className = "ai-provider-list";
   box.innerHTML = providers.length ? providers.map((provider, index) => `
-    <div class="ai-provider-card ${provider.enabled === false ? "disabled" : ""}">
-      <div class="record-title">
-        <strong><span class="ai-provider-order">${index + 1}</span>${safe(provider.name || provider.model || "未命名模型")}</strong>
-        <div class="record-actions">
-          <button class="btn ghost small" data-provider-up="${index}" ${index === 0 ? "disabled" : ""}>上移</button>
-          <button class="btn ghost small" data-provider-down="${index}" ${index === providers.length - 1 ? "disabled" : ""}>下移</button>
-          <button class="btn ghost small" data-provider-toggle="${index}">${provider.enabled === false ? "启用" : "停用"}</button>
-          <button class="btn ghost small" data-provider-edit="${index}">编辑</button>
-          <button class="btn ghost small danger-btn" data-provider-delete="${index}">删除</button>
-        </div>
-      </div>
-      <div class="ai-provider-meta">
-        <span>${provider.enabled === false ? "已停用" : "已启用"}</span>
-        <span>${safe(provider.model || "未填写模型名")}</span>
-        <span>${safe(provider.apiBase || "未填写 API 地址")}</span>
-        <span>${safe(provider.apiKey || "未填写 API Key")}</span>
+    <div class="ai-provider-card ${provider.enabled === false ? "disabled" : ""}" data-provider-id="${safeAttr(provider.id)}">
+      <span class="drag-handle" draggable="true" data-provider-drag="${safeAttr(provider.id)}" title="拖动排序" aria-label="拖动排序">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="4" r="1.25"/><circle cx="11" cy="4" r="1.25"/><circle cx="5" cy="8" r="1.25"/><circle cx="11" cy="8" r="1.25"/><circle cx="5" cy="12" r="1.25"/><circle cx="11" cy="12" r="1.25"/></svg>
+      </span>
+      <div class="ai-provider-name">${safe(provider.name || provider.model || "未命名模型")}</div>
+      <div class="ai-provider-actions">
+        <label class="compact-switch" title="${provider.enabled === false ? "启用模型" : "停用模型"}">
+          <input type="checkbox" data-provider-toggle="${index}" ${provider.enabled === false ? "" : "checked"} aria-label="${provider.enabled === false ? "启用" : "停用"}${safeAttr(provider.name || provider.model || "模型")}">
+          <span></span>
+        </label>
+        <button class="btn ghost small" data-provider-edit="${index}">编辑</button>
       </div>
     </div>
   `).join("") : '<div class="empty">暂无模型版本，点击右上角添加</div>';
 
-  $$("[data-provider-up]").forEach(button => {
-    button.onclick = async () => {
-      const index = Number(button.dataset.providerUp);
-      if (index <= 0) return;
-      [providers[index - 1], providers[index]] = [providers[index], providers[index - 1]];
-      db.settings.aiProviders = orderedProviders(providers);
-      await persistAiSettings();
-      renderAiProviders();
-      renderMailSettings();
-    };
-  });
-  $$("[data-provider-down]").forEach(button => {
-    button.onclick = async () => {
-      const index = Number(button.dataset.providerDown);
-      if (index >= providers.length - 1) return;
-      [providers[index], providers[index + 1]] = [providers[index + 1], providers[index]];
-      db.settings.aiProviders = orderedProviders(providers);
-      await persistAiSettings();
-      renderAiProviders();
-      renderMailSettings();
-    };
-  });
-  $$("[data-provider-toggle]").forEach(button => {
-    button.onclick = async () => {
-      const provider = providers[Number(button.dataset.providerToggle)];
-      provider.enabled = provider.enabled === false;
+  $$("[data-provider-toggle]").forEach(input => {
+    input.onchange = async () => {
+      const provider = providers[Number(input.dataset.providerToggle)];
+      provider.enabled = input.checked;
       db.settings.aiProviders = providers;
       await persistAiSettings();
       renderAiProviders();
@@ -2433,12 +2756,36 @@ function renderAiProviders() {
   $$("[data-provider-edit]").forEach(button => {
     button.onclick = () => openAiProvider(Number(button.dataset.providerEdit));
   });
-  $$("[data-provider-delete]").forEach(button => {
-    button.onclick = async () => {
-      const index = Number(button.dataset.providerDelete);
-      if (!confirm(`确认删除模型版本“${providers[index].name || providers[index].model}”？`)) return;
-      providers.splice(index, 1);
-      db.settings.aiProviders = providers;
+  let draggedProviderId = "";
+  $$("[data-provider-drag]").forEach(handle => {
+    handle.ondragstart = event => {
+      draggedProviderId = handle.dataset.providerDrag;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", draggedProviderId);
+      handle.closest(".ai-provider-card").classList.add("dragging");
+    };
+    handle.ondragend = () => {
+      draggedProviderId = "";
+      $$(".ai-provider-card").forEach(card => card.classList.remove("dragging", "drag-over"));
+    };
+  });
+  $$(".ai-provider-card").forEach(card => {
+    card.ondragover = event => {
+      event.preventDefault();
+      if (card.dataset.providerId !== draggedProviderId) card.classList.add("drag-over");
+    };
+    card.ondragleave = () => card.classList.remove("drag-over");
+    card.ondrop = async event => {
+      event.preventDefault();
+      const sourceId = draggedProviderId || event.dataTransfer.getData("text/plain");
+      const targetId = card.dataset.providerId;
+      if (!sourceId || !targetId || sourceId === targetId) return;
+      const sourceIndex = providers.findIndex(provider => provider.id === sourceId);
+      const targetIndex = providers.findIndex(provider => provider.id === targetId);
+      if (sourceIndex < 0 || targetIndex < 0) return;
+      const [moved] = providers.splice(sourceIndex, 1);
+      providers.splice(targetIndex, 0, moved);
+      db.settings.aiProviders = orderedProviders(providers);
       await persistAiSettings();
       renderAiProviders();
       renderMailSettings();
@@ -2457,12 +2804,12 @@ function openAiProvider(index = -1) {
     <div class="section-title">${index < 0 ? "添加" : "编辑"}模型版本</div>
     <div class="modal-grid">
       <div class="field"><label>版本名称</label><input id="providerName" value="${safe(provider.name)}" placeholder="例如：DeepSeek 主力"></div>
-      <div class="field"><label>状态</label><select id="providerEnabled"><option value="true" ${provider.enabled !== false ? "selected" : ""}>启用</option><option value="false" ${provider.enabled === false ? "selected" : ""}>停用</option></select></div>
+      <label class="switch-row"><input id="providerEnabled" type="checkbox" ${provider.enabled !== false ? "checked" : ""}><span><b>启用模型</b></span></label>
       <div class="field full-span"><label>OpenAI-compatible API 地址</label><input id="providerApiBase" value="${safe(provider.apiBase)}" placeholder="https://api.deepseek.com"></div>
       <div class="field"><label>模型名称</label><input id="providerModel" value="${safe(provider.model)}" placeholder="deepseek-chat"></div>
-      <div class="field"><label>API Key</label><input id="providerApiKey" type="text" autocomplete="off" value="${safe(provider.apiKey)}" placeholder="sk-..."></div>
+      <div class="field"><label>API Key</label><input id="providerApiKey" type="password" autocomplete="off" value="${safe(provider.apiKey)}" placeholder="sk-..."></div>
     </div>
-    <div class="row"><button class="btn ghost" id="cancelModal">取消</button><button class="btn primary" id="saveAiProvider">保存模型</button></div>
+    <div class="row">${index < 0 ? "" : '<button class="btn ghost danger-btn" id="deleteAiProvider">删除</button>'}<span class="modal-spacer"></span><button class="btn ghost" id="cancelModal">取消</button><button class="btn primary" id="saveAiProvider">保存模型</button></div>
   `;
   openModal();
   $("#saveAiProvider").onclick = async () => {
@@ -2479,7 +2826,7 @@ function openAiProvider(index = -1) {
       apiBase,
       model,
       apiKey,
-      enabled: $("#providerEnabled").value === "true",
+      enabled: $("#providerEnabled").checked,
       order: index < 0 ? providers.length : index
     };
     if (index < 0) providers.push(record);
@@ -2490,6 +2837,17 @@ function openAiProvider(index = -1) {
     renderAiProviders();
     renderMailSettings();
   };
+  if ($("#deleteAiProvider")) {
+    $("#deleteAiProvider").onclick = async () => {
+      if (!confirm(`确认删除模型“${provider.name || provider.model}”？`)) return;
+      providers.splice(index, 1);
+      db.settings.aiProviders = orderedProviders(providers);
+      await persistAiSettings();
+      closeModal();
+      renderAiProviders();
+      renderMailSettings();
+    };
+  }
 }
 
 $("#addAiProvider").addEventListener("click", () => openAiProvider());

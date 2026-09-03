@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Bilibili upload fixture</title>
+</head>
+<body>
+  <main class="bili-resume">
+    <section class="bili-resume-card">
+      <header class="bili-form-card-header">简历解析</header>
+      <div class="bili-resume-analysis">
+        <div class="bili-resume-annalysis-uploader">
+          <button type="button">重新上传</button>
+          <input type="file" data-upload-kind="resume" style="display:none">
+        </div>
+      </div>
+    </section>
+
+    <section class="bili-resume-card">
+      <header class="bili-form-card-header">基本信息</header>
+      <div class="ant-form-item bili-form-flex">
+        <div class="ant-form-item-label"><label>简历照片</label></div>
+        <div class="bili-resume-avatar">
+          <div class="bili-resume-avatar-body">
+            <img class="face" alt="当前照片">
+            <footer>重新上传</footer>
+            <input type="file" data-upload-kind="avatar" style="display:none">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="bili-resume-card" id="作品展示非必填">
+      <header class="bili-form-card-header">作品展示</header>
+      <div class="bili-resume-annex">
+        <div class="bili-resume-annex-uploader">附件</div>
+        <input type="file" data-upload-kind="generic" style="display:none">
+      </div>
+    </section>
+  </main>
+
+  <button id="run-fixture" type="button">运行夹具</button>
+  <pre id="result">not-run</pre>
+
+  <script>
+    const avatarDataUrl =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    const resumeDataUrl = "data:application/pdf;base64,JVBERi0xLjQKJSVFT0YK";
+    const uploads = [];
+
+    const fixtureStore = {
+      personal: {
+        avatarFile: {
+          name: "avatar.png",
+          type: "image/png",
+          size: 68,
+          dataUrl: avatarDataUrl
+        }
+      },
+      education: [],
+      projects: [],
+      languages: [],
+      skills: [],
+      awards: [],
+      papers: [],
+      certificates: [],
+      portfolio: [],
+      profiles: [{
+        id: "profile-1",
+        name: "B站附件测试",
+        resumeFile: {
+          name: "resume.pdf",
+          type: "application/pdf",
+          size: 15,
+          dataUrl: resumeDataUrl
+        },
+        work: []
+      }],
+      activeProfileId: "profile-1",
+      settings: {},
+      customFields: []
+    };
+
+    window.chrome = {
+      storage: {
+        local: {
+          get: async keys => Object.fromEntries(keys.map(key => [key, fixtureStore[key]]))
+        }
+      },
+      runtime: {
+        sendMessage: async () => ({ matches: [], source: "disabled" }),
+        onMessage: { addListener: () => {} }
+      }
+    };
+
+    function bindUpload(input) {
+      input.addEventListener("change", () => {
+        const kind = input.dataset.uploadKind;
+        uploads.push({ kind, name: input.files?.[0]?.name || "" });
+        const replacement = input.cloneNode();
+        bindUpload(replacement);
+        input.replaceWith(replacement);
+        if (kind === "resume") {
+          const notice = document.createElement("div");
+          notice.className = "bili-resume-analysis-notice";
+          notice.textContent = "将简历内容解析到下方表单？";
+          document.querySelector(".bili-resume-analysis").append(notice);
+        }
+        if (kind === "avatar") {
+          document.querySelector(".bili-resume-avatar .face").alt = "新照片已上传";
+          const resumeInput = document.querySelector('[data-upload-kind="resume"]');
+          const resumeReplacement = resumeInput.cloneNode();
+          bindUpload(resumeReplacement);
+          resumeInput.replaceWith(resumeReplacement);
+        }
+      });
+    }
+    document.querySelectorAll("input[type=file]").forEach(bindUpload);
+  </script>
+  <script src="../content.js"></script>
+  <script>
+    window.runBilibiliUploadFixture = async () => {
+      const response = await window.__jianfillTest.fillCurrentFrame("full");
+      const result = {
+        response,
+        uploads,
+        avatarReplaced:
+          document.querySelector(".bili-resume-avatar .face").alt === "新照片已上传",
+        resumeNotice:
+          Boolean(document.querySelector(".bili-resume-analysis-notice")),
+        genericAttachmentCount:
+          uploads.filter(item => item.kind === "generic").length
+      };
+      result.pass =
+        uploads.length === 2 &&
+        uploads[0].kind === "avatar" &&
+        uploads[0].name === "avatar.png" &&
+        uploads[1].kind === "resume" &&
+        uploads[1].name === "resume.pdf" &&
+        result.avatarReplaced &&
+        result.resumeNotice &&
+        result.genericAttachmentCount === 0 &&
+        response.items.filter(item => item.status === "已上传").length === 2;
+      document.querySelector("#result").textContent = JSON.stringify(result, null, 2);
+      return result;
+    };
+
+    document.querySelector("#run-fixture").addEventListener("click", () => {
+      window.runBilibiliUploadFixture().catch(error => {
+        document.querySelector("#result").textContent = JSON.stringify({
+          error: error.message
+        });
+      });
+    });
+  </script>
+</body>
+</html>

@@ -63,7 +63,9 @@ const FIELD_DEFS = {
   degree: ["学位"],
   educationType: ["学历类型", "学习形式", "培养方式"],
   gpa: ["平均绩点", "绩点", "GPA"],
-  rank: ["专业排名", "成绩排名", "排名"],
+  rank: ["专业排名", "专业综合排名", "班级排名", "年级排名", "学业排名", "综合排名", "成绩排名", "排名"],
+  doubleDegree: ["是否双学位", "双学位", "第二学位", "辅修学位", "dual degree", "double degree"],
+  mba: ["是否MBA", "是否为MBA", "MBA项目", "工商管理硕士", "mba"],
   courses: ["主修课程", "专业课程", "课程"],
   skillsSummary: ["擅长的开发语言", "开发语言", "专业技能", "技能特长", "计算机技能"],
   languagesSummary: ["外语能力", "语言能力", "外语水平"],
@@ -85,6 +87,8 @@ const REPEAT_DEFS = [
       city: ["学校所在地", "学校城市", "就读城市", "location"],
       gpa: FIELD_DEFS.gpa,
       rank: FIELD_DEFS.rank,
+      doubleDegree: FIELD_DEFS.doubleDegree,
+      mba: FIELD_DEFS.mba,
       courses: FIELD_DEFS.courses,
       research: ["研究方向", "研究领域", "research area", "field of research"],
       thesis: ["毕业论文", "论文题目", "thesis", "dissertation"],
@@ -95,7 +99,7 @@ const REPEAT_DEFS = [
   },
   {
     type: "work",
-    titles: ["实习经历", "实习经验", "工作经历", "工作经验", "工作信息", "任职经历", "校外实习或工作经历", "校外实习", "校外工作经历", "work experience", "employment history", "experience"],
+    titles: ["实习经历", "实习/工作经历", "实习经验", "工作经历", "工作经验", "工作信息", "任职经历", "校外实习或工作经历", "校外实习", "校外工作经历", "work experience", "employment history", "experience"],
     anchors: ["公司名称", "企业名称", "单位名称", "实习单位", "任职公司", "公司", "企业", "company", "employer", "organization"],
     fields: {
       company: ["公司名称", "企业名称", "单位名称", "实习单位", "任职公司", "公司", "企业", "company", "employer", "organization"],
@@ -206,6 +210,7 @@ const REPEAT_DEFS = [
 ];
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const fileControlTypes = new WeakMap();
 
 function normalizeText(value) {
   return String(value || "")
@@ -275,12 +280,25 @@ function customSelectControls(root = document, baseControls = controls(root)) {
 }
 
 function fileControls(root = document) {
-  return queryAllDeep(root, "input[type=file]")
+  const result = queryAllDeep(root, "input[type=file]")
     .filter(element => {
       if (element.disabled) return false;
+      const bilibiliType = knownFileControlType(element);
+      if (bilibiliType) fileControlTypes.set(element, bilibiliType);
+      if (bilibiliType === "avatar" || bilibiliType === "resume") return true;
+      if (bilibiliType === "generic") return false;
       const text = normalizeText(`${element.accept || ""} ${labelOf(element)} ${nearbyTextOf(element)}`);
-      return isVisible(element) || /image|头像|照片|证件照|photo|avatar|portrait|headshot/.test(text);
+      return isVisible(element) ||
+        /image|头像|照片|证件照|photo|avatar|portrait|headshot|简历|履历|resume|curriculumvitae|\bcv\b/.test(text);
     });
+  return result.sort((left, right) => {
+    const priority = element => ({
+      avatar: 0,
+      resume: 1,
+      generic: 3
+    })[knownFileControlType(element)] ?? 2;
+    return priority(left) - priority(right);
+  });
 }
 
 function radioGroups(root = document) {
@@ -707,6 +725,14 @@ function matchControl(element, customFields = []) {
     }
   });
   if (element instanceof HTMLInputElement && element.type === "file") {
+    const bilibiliType = knownFileControlType(element);
+    if (bilibiliType === "avatar") {
+      return { key: "avatarFile", label: "简历照片", confidence: 100 };
+    }
+    if (bilibiliType === "resume") {
+      return { key: "resumeAttachment", label: "简历附件", confidence: 100 };
+    }
+    if (bilibiliType === "generic") return null;
     const accept = normalizeText(element.accept || "");
     const explicitText = normalizeText([
       label,
@@ -826,6 +852,41 @@ function setFileInput(element, file) {
     element.dispatchEvent(new Event(type, { bubbles: true }));
   });
   return element.files?.length > 0;
+}
+
+function bilibiliFileControlType(element) {
+  if (!(element instanceof HTMLInputElement) || element.type !== "file") return "";
+  if (element.closest?.(".bili-resume-avatar")) return "avatar";
+  if (element.closest?.(".bili-resume-analysis")) return "resume";
+  if (element.closest?.(".bili-resume-annex")) return "generic";
+  return "";
+}
+
+function knownFileControlType(element) {
+  return bilibiliFileControlType(element) || fileControlTypes.get(element) || "";
+}
+
+function replacementFileControl(element, value) {
+  const storedFileType = String(value?.type || "");
+  const storedFileName = String(value?.name || "");
+  const inferredBilibiliType = document.querySelector(".bili-resume")
+    ? /^image\//i.test(storedFileType) || /\.(png|jpe?g|bmp|webp)$/i.test(storedFileName)
+      ? "avatar"
+      : /\.(pdf|docx?)$/i.test(storedFileName) ? "resume" : ""
+    : "";
+  const bilibiliType = knownFileControlType(element) || inferredBilibiliType;
+  const candidates = fileControls(document);
+  if (bilibiliType) {
+    return candidates.find(candidate =>
+      knownFileControlType(candidate) === bilibiliType
+    ) || null;
+  }
+  const label = normalizeText(labelOf(element));
+  const accept = normalizeText(element.accept);
+  return candidates.find(candidate =>
+    normalizeText(labelOf(candidate)) === label &&
+    normalizeText(candidate.accept) === accept
+  ) || null;
 }
 
 function plainValueMatches(element, expected) {
@@ -1349,6 +1410,127 @@ async function chooseAntDate(element, value) {
   return Boolean(String(element.value || "").trim());
 }
 
+async function chooseAntMonth(element, value) {
+  const picker = element.closest?.(".ant-calendar-picker");
+  const date = splitDate(value);
+  const targetYear = Number(date.year);
+  const targetMonth = Number(date.month);
+  if (!picker || !targetYear || !targetMonth) return false;
+
+  clickElement(picker);
+  await sleep(180);
+  let panel = visibleOne(".ant-calendar-month-panel");
+  if (!panel) return false;
+
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const shownYear = Number(
+      normalizeText(
+        panel.querySelector(".ant-calendar-month-panel-year-select-content")?.textContent ||
+        panel.querySelector(".ant-calendar-month-panel-year-select")?.textContent
+      ).match(/\d{4}/)?.[0] || 0
+    );
+    if (!shownYear || shownYear === targetYear) break;
+    const button = panel.querySelector(
+      shownYear > targetYear
+        ? ".ant-calendar-month-panel-prev-year-btn"
+        : ".ant-calendar-month-panel-next-year-btn"
+    );
+    if (!button) return false;
+    clickElement(button);
+    await sleep(70);
+    panel = visibleOne(".ant-calendar-month-panel");
+    if (!panel) return false;
+  }
+
+  const shownYear = Number(
+    normalizeText(
+      panel.querySelector(".ant-calendar-month-panel-year-select-content")?.textContent ||
+      panel.querySelector(".ant-calendar-month-panel-year-select")?.textContent
+    ).match(/\d{4}/)?.[0] || 0
+  );
+  if (shownYear && shownYear !== targetYear) return false;
+  const cells = [...panel.querySelectorAll(".ant-calendar-month-panel-cell")]
+    .filter(cell => !cell.classList.contains("ant-calendar-month-panel-cell-disabled"));
+  const monthCell = cells.find(cell =>
+    Number(normalizeText(
+      cell.querySelector(".ant-calendar-month-panel-month")?.textContent || cell.textContent
+    ).match(/\d+/)?.[0] || 0) === targetMonth
+  ) || cells[targetMonth - 1];
+  if (!monthCell) return false;
+  clickElement(monthCell.querySelector(".ant-calendar-month-panel-month") || monthCell);
+  await sleep(180);
+  return Boolean(String(element.value || "").trim());
+}
+
+function bilibiliSectionType(root) {
+  if (!root?.matches?.(".bili-resume-card")) return "";
+  const id = normalizeText(root.id);
+  if (id === normalizeText("resume实习/工作经历") || id === normalizeText("resume工作经历")) {
+    return "work";
+  }
+  if (id === normalizeText("resume项目经历")) return "projects";
+  return "";
+}
+
+function bilibiliSectionForDefinition(definition) {
+  if (!document.querySelector(".bili-resume")) return null;
+  const ids = definition.type === "work"
+    ? ["resume实习/工作经历", "resume工作经历"]
+    : definition.type === "projects" ? ["resume项目经历"] : [];
+  return ids.map(id => document.getElementById(id)).find(isVisible) || null;
+}
+
+async function fillBilibiliDateRange(block, record, overwrite, used) {
+  if (!bilibiliSectionType(block.closest?.(".bili-resume-card"))) {
+    return { handled: false, filled: 0, failed: 0 };
+  }
+  const dateRoot = queryAllDeep(block, ".bili-date").find(isVisible);
+  if (!dateRoot) return { handled: false, filled: 0, failed: 0 };
+
+  const dateInputs = () => queryAllDeep(
+    dateRoot,
+    ".ant-calendar-picker input:not([type=hidden]),input.ant-calendar-picker-input"
+  ).filter(isVisible);
+  let inputs = dateInputs();
+  if (!inputs.length) return { handled: false, filled: 0, failed: 0 };
+  inputs.forEach(input => used.add(input));
+
+  const wantsPresent = recordWantsPresent(record);
+  const currentControl = currentRangeControl(dateRoot);
+  if (overwrite && currentControl && checkboxIsChecked(currentControl) !== wantsPresent) {
+    clickElement(currentControl);
+    await sleep(180);
+    inputs = dateInputs();
+    inputs.forEach(input => used.add(input));
+  }
+
+  let filled = 0;
+  let failed = 0;
+  const start = inputs[0];
+  if (record.start && start && (overwrite || isBlankControl(start))) {
+    if (await chooseAntMonth(start, record.start)) filled += 1;
+    else failed += 1;
+  }
+
+  if (wantsPresent) {
+    if (currentControl && !checkboxIsChecked(currentControl)) {
+      clickElement(currentControl);
+      await sleep(120);
+      filled += 1;
+    }
+    return { handled: true, filled, failed };
+  }
+
+  const end = inputs[1];
+  if (record.end && end && (overwrite || isBlankControl(end))) {
+    if (await chooseAntMonth(end, record.end)) filled += 1;
+    else failed += 1;
+  } else if (record.end && !end) {
+    failed += 1;
+  }
+  return { handled: true, filled, failed };
+}
+
 function selectWrapperFor(element) {
   const libraryWrapper = element.closest(".phoenix-select,.ant-select,.atsx-select,.el-select,.ivu-select,[role=combobox]");
   if (libraryWrapper) return libraryWrapper;
@@ -1427,10 +1609,22 @@ function optionCandidates(target) {
   );
 }
 
+function percentileRankValue(value) {
+  const source = String(value || "").replace(/％/g, "%");
+  return source.match(/(?:前|top)\s*(5|10|20|30|50)\s*(?:%|percent)/i)?.[1] ||
+    source.match(/百分之\s*(5|10|20|30|50)/)?.[1] ||
+    "";
+}
+
 function optionScore(text, value) {
   const option = normalizeText(text);
   const wanted = normalizeText(value);
   if (!option || !wanted) return 0;
+  const wantedPercentile = percentileRankValue(value);
+  const optionPercentile = percentileRankValue(text);
+  if (wantedPercentile || optionPercentile) {
+    return wantedPercentile && wantedPercentile === optionPercentile ? 100 : 0;
+  }
   const yesWords = ["是", "有", "可以", "接受", "愿意", "yes", "true", "y"];
   const noWords = ["否", "无", "不需要", "不接受", "不愿意", "no", "false", "n"];
   const polarity = source => {
@@ -1711,9 +1905,13 @@ function controlCurrentValue(element) {
 async function fillControl(element, value, overwrite = false) {
   if (value == null || (typeof value !== "object" && String(value).trim() === "")) return "empty";
   if (element instanceof HTMLInputElement && element.type === "file") {
-    if (!overwrite && element.files?.length) return "skipped";
+    const target = element.isConnected ? element : replacementFileControl(element, value);
+    if (!target) return "file";
+    if (!overwrite && target.files?.length) return "skipped";
     const file = fileFromStoredData(value);
-    return setFileInput(element, file) ? "filled" : "file";
+    const selected = setFileInput(target, file);
+    if (selected) await sleep(140);
+    return selected ? "filled" : "file";
   }
   if (componentType(element) === "option-group") {
     if (!overwrite && optionGroupHasValue(element)) return "skipped";
@@ -1751,7 +1949,12 @@ async function fillControl(element, value, overwrite = false) {
   if (!overwrite && String(current).trim() && !isPlaceholderValue(current)) return "skipped";
 
   if (element instanceof HTMLSelectElement) {
-    return setNativeValue(element, value) ? "filled" : "failed";
+    const option = bestOption([...element.options], value, isSchoolControl(element));
+    if (!option) return "failed";
+    element.value = option.value;
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    return optionMatchText(option.textContent || option.value, value) ? "filled" : "failed";
   }
 
   const choiceWrapper = selectWrapperFor(element);
@@ -1829,6 +2032,10 @@ function repeatAddTokens(definition) {
 }
 
 function findAddButton(root, definition) {
+  const bilibiliAdd = bilibiliSectionType(root) === definition?.type
+    ? root.querySelector?.(".bili-form-add")
+    : null;
+  if (bilibiliAdd && isVisible(bilibiliAdd)) return bilibiliAdd;
   const candidates = queryAllDeep(root, "button,a,[role=button],div,span").filter(element => {
     if (!isVisible(element) || element.disabled) return false;
     const text = normalizeText(element.innerText || element.textContent || element.getAttribute("aria-label"));
@@ -2023,16 +2230,22 @@ async function fillWorkByLayout(block, record, overwrite, used) {
     }
   }
 
-  const periodResult = await fillAtsxPeriodMonthRange(block, record, overwrite, used);
-  const throneResult = periodResult.handled
+  const bilibiliResult = await fillBilibiliDateRange(block, record, overwrite, used);
+  const periodResult = bilibiliResult.handled
+    ? { handled: false, filled: 0, failed: 0 }
+    : await fillAtsxPeriodMonthRange(block, record, overwrite, used);
+  const throneResult = bilibiliResult.handled || periodResult.handled
     ? { handled: false, filled: 0, failed: 0 }
     : await fillThroneDateRange(block, record, overwrite, used);
-  const atsxResult = periodResult.handled || throneResult.handled
+  const atsxResult = bilibiliResult.handled || periodResult.handled || throneResult.handled
     ? { handled: false, filled: 0, failed: 0 }
     : await fillAtsxDateRange(block, record, overwrite, used);
-  let dateFailed = periodResult.failed + throneResult.failed + atsxResult.failed;
+  let dateFailed = bilibiliResult.failed + periodResult.failed + throneResult.failed + atsxResult.failed;
   let partsResult = { filled: 0, failed: 0, handled: false };
-  if (periodResult.handled) {
+  if (bilibiliResult.handled) {
+    filled += bilibiliResult.filled;
+    notes.push("起止年月（B站月份组件）");
+  } else if (periodResult.handled) {
     filled += periodResult.filled;
     notes.push("起止年月（飞书月份组件）");
   } else if (throneResult.handled) {
@@ -2046,9 +2259,9 @@ async function fillWorkByLayout(block, record, overwrite, used) {
     filled += partsResult.filled;
     dateFailed += partsResult.failed;
   }
-  if (!periodResult.handled && !throneResult.handled && !atsxResult.handled && partsResult.handled) {
+  if (!bilibiliResult.handled && !periodResult.handled && !throneResult.handled && !atsxResult.handled && partsResult.handled) {
     notes.push("起止年月");
-  } else if (!periodResult.handled && !throneResult.handled && !atsxResult.handled && !partsResult.handled) {
+  } else if (!bilibiliResult.handled && !periodResult.handled && !throneResult.handled && !atsxResult.handled && !partsResult.handled) {
     if (startControl && record.start && (overwrite || isBlankControl(startControl))) {
       const value = dateValueForBoundary(record.start, "start", startControl);
       const selected = await choosePhoenixMonth(startControl, value);
@@ -2138,6 +2351,9 @@ function recordAnchorControls(root, definition) {
 }
 
 function recordBlocks(root, definition) {
+  if (bilibiliSectionType(root) === definition.type) {
+    return [...root.querySelectorAll(".bili-form-multiple")].filter(isVisible);
+  }
   const anchorControls = recordAnchorControls(root, definition);
   if (anchorControls.length) {
     const blocks = [];
@@ -2177,7 +2393,8 @@ async function ensureRecordBlocks(root, definition, count) {
   while (blocks.length < count && attempts < count + 2) {
     const button = findAddButton(root, definition);
     if (!button) break;
-    button.click();
+    if (bilibiliSectionType(root) === definition.type) clickElement(button);
+    else button.click();
     await sleep(420);
     const next = recordBlocks(root, definition);
     if (next.length <= blocks.length) {
@@ -2261,6 +2478,8 @@ async function fillYearMonthParts(block, record, overwrite, used) {
 async function fillDateRange(block, record, overwrite, used) {
   const startAliases = ["开始时间", "起始时间", "入学时间", "就读开始时间", "开始日期", "起止时间", "start date", "from"];
   const endAliases = ["结束时间", "毕业时间", "离职时间", "就读结束时间", "结束日期", "end date", "to"];
+  const bilibiliResult = await fillBilibiliDateRange(block, record, overwrite, used);
+  if (bilibiliResult.handled) return bilibiliResult.filled;
   const periodResult = await fillAtsxPeriodMonthRange(block, record, overwrite, used);
   if (periodResult.handled) return periodResult.filled;
   const throneResult = await fillThroneDateRange(block, record, overwrite, used);
@@ -2308,6 +2527,10 @@ async function fillDateRange(block, record, overwrite, used) {
 function normalizedEducationChoice(key, value) {
   const source = String(value ?? "").trim();
   if (!source) return source;
+  if (key === "doubleDegree" || key === "mba") {
+    if (/^(是|有|true|yes|y|1)$/i.test(source)) return "是";
+    if (/^(否|无|false|no|n|0)$/i.test(source)) return "否";
+  }
   if (key === "level") {
     if (/博士|phd|doctor/i.test(source)) return "博士";
     if (/硕士|研究生|master/i.test(source)) return "硕士";
@@ -2324,7 +2547,7 @@ function normalizedEducationChoice(key, value) {
     if (/自考/.test(source)) return "自考";
   }
   if (key === "rank") {
-    const percentile = source.match(/(?:前|top)?\s*(5|10|20|30|50)\s*%/i)?.[1];
+    const percentile = percentileRankValue(source);
     if (percentile) return `前 ${percentile}%`;
   }
   return source;
@@ -2335,6 +2558,35 @@ async function fillRecord(block, definition, record, overwrite) {
   let layout = { filled: 0, notes: [], diagnostics: [] };
   if (definition.type === "work") {
     layout = await fillWorkByLayout(block, record, overwrite, used);
+  } else if (
+    definition.type === "projects" &&
+    bilibiliSectionType(block.closest?.(".bili-resume-card")) === "projects"
+  ) {
+    const description = recordDescription(record);
+    const textarea = findControlByAliases(
+      block,
+      REPEAT_DEFS.find(item => item.type === "projects").fields.content,
+      used,
+      "content"
+    );
+    const handledKeys = new Set(["content", "duty", "result", "current"]);
+    let filled = 0;
+    let failed = 0;
+    if (textarea && description) {
+      used.add(textarea);
+      const status = await fillControl(textarea, description, overwrite);
+      if (status === "filled") filled += 1;
+      else if (status === "failed" || status === "readonly") failed += 1;
+    } else if (description) {
+      failed += 1;
+    }
+    layout = {
+      filled,
+      failed,
+      handledKeys,
+      notes: ["项目描述（内容/职责/成果合并）"],
+      diagnostics: []
+    };
   }
   let filled = layout.filled;
   if (definition.type !== "work") {
@@ -2363,6 +2615,8 @@ async function fillRecord(block, definition, record, overwrite) {
 }
 
 function sectionForDefinition(definition) {
+  const bilibiliSection = bilibiliSectionForDefinition(definition);
+  if (bilibiliSection) return bilibiliSection;
   if (definition.type !== "work") return findSection(definition.titles, definition);
   return byteDanceInternshipSection() ||
     findSection(["实习经历", "实习经验"], definition) ||
@@ -2459,6 +2713,8 @@ function flattened(personal, education, profile, skills = [], languages = []) {
     educationType: firstEducation.type || personal.educationType,
     gpa: firstEducation.gpa || personal.gpa,
     rank: firstEducation.rank || personal.rank,
+    doubleDegree: firstEducation.doubleDegree || personal.doubleDegree,
+    mba: firstEducation.mba || personal.mba,
     courses: firstEducation.courses || personal.courses,
     graduationDate,
     graduationYear: personal.graduationYear || String(graduationDate).match(/\d{4}/)?.[0] || "",

@@ -21,16 +21,15 @@ Native Messaging 本地桥接已提供 Windows 开发版适配：
 当前资料保存在当前浏览器配置文件的 `chrome.storage.local` 中。它不会因为登录
 同一个 Chrome 账号就可靠地同步到另一台电脑，也不应直接迁移 Chrome 用户目录。
 
-### 推荐 MVP：密码加密备份包
+### 当前方案：JSON 数据迁移
 
-在设置页增加：
+设置页提供：
 
-- `导出加密备份`
-- `导入加密备份`
-- 导出范围预览
-- 导入冲突策略：合并 / 覆盖
+- `导出 JSON`
+- `导入 JSON`
+- 导入前自动导出本机回滚文件
 
-备份文件扩展名建议为 `.jianfill-backup`，格式包含：
+迁移文件包含：
 
 - schema 版本
 - 导出时间
@@ -38,27 +37,14 @@ Native Messaging 本地桥接已提供 Windows 开发版适配：
 - 简历版本、自定义字段、固定回答规则
 - 可选的网申历史
 
-默认排除：
+迁移文件默认排除：
 
-- AI API Key
-- 邮箱客户端授权码
-- 飞书 App Secret
 - 招聘网站 Cookie / storage state
 - Native Host 加密密钥
+- 临时标签页、运行状态和 AI 映射缓存
 
-加密建议使用 Web Crypto：
-
-- KDF：PBKDF2-SHA-256，随机 salt，至少 310,000 次迭代
-- 加密：AES-256-GCM，随机 IV
-- 文件中只保存 salt、IV、迭代次数、密文和格式版本
-- 密码不保存、不上传
-
-该方案能让用户在 macOS 导出、Windows 导入，且不需要建设云账号系统。
-
-### 后续方案：端到端加密云同步
-
-只有在多设备持续同步成为核心需求后再建设。服务端只存密文，密钥由用户密码派生，
-不应让服务端持有可解密个人简历的数据。
+JSON 未加密，可能包含 API Key、邮箱授权码和飞书 App Secret，应只保存在可信设备。
+该方案能让用户在 macOS 导出、Windows 导入，且不需要云端同步或账号系统。
 
 ## Windows Native Host
 
@@ -118,7 +104,7 @@ Keychain 密钥复制到 Windows，也不要把招聘站 Cookie 放入普通资�
 
 ### P0：跨设备资料迁移
 
-- 实现加密备份导出 / 导入
+- [x] 实现 JSON 导出 / 导入
 - 加 schema 版本和迁移测试
 - 在 macOS Chrome 与 Windows Chrome 做交叉导入验收
 
@@ -143,7 +129,6 @@ Keychain 密钥复制到 Windows，也不要把招聘站 Cookie 放入普通资�
 | 场景 | 目标证据 |
 | --- | --- |
 | macOS 导出，Windows 导入 | 资料条数和关键字段完全一致 |
-| 错误密码导入 | 明确报错且不覆盖现有资料 |
 | 旧 schema 导入 | 自动迁移或拒绝并给出版本说明 |
 | Windows Chrome 自动填表 | 目标测试页关键字段成功填写 |
 | Windows Native Host Ping | 扩展返回桥接版本 |

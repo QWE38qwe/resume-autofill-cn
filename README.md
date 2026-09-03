@@ -31,9 +31,10 @@
 - 支持为每个简历版本绑定本地 PDF、DOC 或 DOCX，并在招聘网站简历附件控件中自动上传。
 - 支持一键填写（覆盖已有内容）和补充填写（仅填写空白项）。
 - 支持教育、实习、项目、语言和奖项等重复记录。
+- 教育经历支持双学位、MBA 和专业排名百分位，并兼容 `前10%`、`Top 10%` 等写法。
 - 支持原生控件及常见 React / Vue 组件、iframe 和开放 Shadow DOM。
 - 支持 Ant Design、Element、iView、Phoenix、`sd-Select` 等组件。
-- 支持 PDF、DOCX、TXT 和 Markdown 简历解析。
+- 支持 PDF、DOCX、TXT 和 Markdown 简历解析；未配置 AI 时可在本机提取姓名、邮箱、学校和实习经历。
 - 可选接入 DeepSeek 兼容 API，AI 只负责字段语义映射。
 - 本地记录网申公司、链接、简历版本、时间和备注，可导出 CSV。
 - 默认读取最近 24 小时招聘邮件，周期可配置，仅识别在线测评、AI 面试和面试邀约。
@@ -41,6 +42,7 @@
 - 识别拒信 / 岗位关闭邮件，自动把公司主记录 `进展` 标记为 `已挂`，并新增一条待办留痕，便于第一时间看到最新进展。
 - 邮件读取记录在本地看板展示，支持手动同步和自定义自动同步间隔（默认 12 小时）。
 - 投递进展页支持两步式接入（① 登录 → ② 连接并验证），保存登录态后自动验证并回写飞书 `Cookie状态`，操作反馈统一用轻量提示。
+- 支持导入、导出 JSON，在不同设备间迁移个人资料、经历、简历版本和本地设置。
 
 ## 安装
 
@@ -79,8 +81,9 @@ Base Token 和目标 Table ID。
 Chrome / Edge 中的资料管理、简历版本、字段识别和自动填表可以在 Windows 使用。
 Windows 11 x64 现可通过 PowerShell 安装开发版 Native Host，使用同一套邮件同步和
 招聘站巡检代码；招聘站登录态密钥由当前 Windows 用户的 DPAPI 保护。Windows 真机
-仍需完成最终 E2E 验收，且当前不是签名安装器。跨设备资料加密备份尚未实现，详见
-[Windows 支持与资料迁移方案](docs/WINDOWS_SUPPORT_PLAN.md)。
+仍需完成最终 E2E 验收，且当前不是签名安装器。个人资料和设置可通过 JSON 文件
+在 macOS 与 Windows 间迁移；招聘网站 Cookie 和 Native Host SQLite 不会迁移。
+详见 [JSON 数据迁移](docs/DATA_MIGRATION.md)。
 
 ## 使用
 
@@ -113,6 +116,12 @@ Windows 11 x64 现可通过 PowerShell 安装开发版 Native Host，使用同�
 投递成功、简历创建成功、验证码、招聘宣传、职位推荐和就业群邀请均忽略。
 `ddl` 优先使用明确截止时间；只有邮件写明有效期时，才按接收时间加有效期计算。
 
+## JSON 数据迁移
+
+进入“设置 -> 数据迁移”可导出或导入 JSON。导入会覆盖当前设备数据，并在覆盖前
+自动导出回滚文件。JSON 未加密，应只保存在可信设备中。详见
+[JSON 数据迁移](docs/DATA_MIGRATION.md)。
+
 ## 投递进展
 
 投递进展巡检仅读取本机已保存的招聘网站登录态和投递页，不会投递、撤回或修改招聘站数据。
@@ -137,8 +146,9 @@ Windows 11 x64 现可通过 PowerShell 安装开发版 Native Host，使用同�
 - 头像照片由用户在管理台主动上传后保存在本机浏览器，不会按本地路径自动读取文件。
 - 简历附件仅在用户主动选择后绑定到对应版本并保存在本机；自动填表只会把它写入明确识别为简历的文件控件。
 - 字段语义映射只向用户配置的 AI 服务发送网页字段元数据和标准字段名称，不发送个人资料值。
-- 使用“导入简历解析”时，所选简历文本会发送给用户配置的 AI 服务。
+- 使用“导入简历解析”时，未配置 AI 会在本机进行基础规则解析；配置 AI 后，简历文本会发送给用户选择的模型服务。
 - 邮箱账号、客户端授权码和飞书配置保存在 `chrome.storage.local`。
+- JSON 数据迁移文件可能包含个人资料、附件和本地配置，文件不会自动上传；临时运行状态和 Native Host Cookie / SQLite 不进入迁移文件。
 - 本地桥接只读取用户设置周期内的邮件；本地规则先筛选，只有疑似明确邀约的邮件正文会发送到用户配置的 AI 服务。
 - 邮件主题、分类、接收时间、DDL 和处理状态保存在本地邮件看板。
 - 扩展不包含遥测、广告或第三方统计。
@@ -172,7 +182,7 @@ node --check popup.js
 bash scripts/privacy-check.sh
 ```
 
-京东、Hotjob、头像、简历附件和受控输入回归夹具可通过本地静态服务器打开：
+京东、Hotjob、B 站、头像、简历附件和受控输入回归夹具可通过本地静态服务器打开：
 
 ```bash
 python3 -m http.server 8877
@@ -180,8 +190,11 @@ python3 -m http.server 8877
 # 浏览器访问 http://127.0.0.1:8877/tests/hotjob-basic-fixture.html
 # 浏览器访问 http://127.0.0.1:8877/tests/hotjob-work-fixture.html
 # 浏览器访问 http://127.0.0.1:8877/tests/feishu-date-range-fixture.html
+# 浏览器访问 http://127.0.0.1:8877/tests/education-fields-fixture.html
 # 浏览器访问 http://127.0.0.1:8877/tests/avatar-fixture.html
 # 浏览器访问 http://127.0.0.1:8877/tests/profile-file-and-controlled-input-fixture.html
+# 浏览器访问 http://127.0.0.1:8877/tests/bilibili-resume-fixture.html
+# 浏览器访问 http://127.0.0.1:8877/tests/bilibili-upload-fixture.html
 ```
 
 ## 安全

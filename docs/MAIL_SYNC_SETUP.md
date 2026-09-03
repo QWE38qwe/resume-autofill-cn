@@ -17,12 +17,12 @@
 | 资料管理、简历版本、自动填表 | 支持 | 支持 |
 | IMAP 邮件同步 | 支持 | 开发版支持，待 Windows 真机验收 |
 | 招聘站后台巡检 | 支持，部分站点需手动核对 | 开发版支持，待 Windows 真机验收 |
-| macOS 与 Windows 资料一键迁移 | 尚未支持 | 尚未支持 |
+| JSON 资料导入、导出 | 支持 | 支持 |
 
 Windows Native Host 使用 PowerShell 安装、当前用户注册表和 DPAPI。两套系统运行
-同一个 Python 业务包，但登录态密钥互不兼容。`chrome.storage.local` 不会可靠地
-跨设备同步，因此目前没有正式支持的 macOS -> Windows 资料迁移流程。跨平台加密备份方案见
-[Windows 支持与资料迁移方案](WINDOWS_SUPPORT_PLAN.md)。
+同一个 Python 业务包，但登录态密钥互不兼容。个人资料和扩展设置可以通过 JSON
+文件迁移；招聘网站 Cookie、密钥和 SQLite 状态不会跨设备迁移。配置方法见
+[JSON 数据迁移](DATA_MIGRATION.md)。
 
 ## 一、准备扩展和本地桥接
 

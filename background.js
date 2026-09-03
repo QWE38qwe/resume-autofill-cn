@@ -2,6 +2,7 @@ const defaultAiRules = [];
 const MAIL_NATIVE_HOST = "cn.local.jianfill.mail";
 const MAIL_ALARM = "jianfill-mail-sync";
 const PROGRESS_ALARM = "jianfill-progress-monitor";
+const DATA_SYNC_ALARM = "jianfill-data-sync";
 const NATIVE_MESSAGE_TIMEOUT_MS = 5 * 60 * 1000;
 // 百度受反爬拦截，OPPO 的登录 token 不可导出，大疆则要求每次通过手机号验证码
 // 查询。这些渠道改为读取用户当前 Chrome 标签页判定状态。
@@ -66,6 +67,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   await chrome.storage.local.set(payload);
   await scheduleMailSync(payload.mailSettings);
   await scheduleProgressMonitor(payload.mailSettings);
+  await chrome.alarms.clear(DATA_SYNC_ALARM);
 });
 
 function chatEndpoint(apiBase) {
@@ -474,9 +476,10 @@ function mergeMailHistory(existing, incoming) {
       return;
     }
     const next = { ...previous, ...item };
-    ["company", "category", "deadline", "assessmentUrl"].forEach(key => {
+    ["company", "category", "deadline", "assessmentUrl", "customNote"].forEach(key => {
       if (item[key] == null && previous[key] != null) next[key] = previous[key];
     });
+    if (previous.status === "已挂") next.status = "已挂";
     merged.set(item.messageId, next);
   });
   return [...merged.values()]
@@ -834,6 +837,7 @@ chrome.runtime.onStartup.addListener(async () => {
   const { mailSettings = {} } = await chrome.storage.local.get(["mailSettings"]);
   await scheduleMailSync(mailSettings);
   await scheduleProgressMonitor(mailSettings);
+  await chrome.alarms.clear(DATA_SYNC_ALARM);
 });
 
 chrome.alarms.onAlarm.addListener(alarm => {
@@ -867,6 +871,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       scheduleMailSync(message.mailSettings || {}),
       scheduleProgressMonitor(message.mailSettings || {})
     ])
+      .then(() => sendResponse({ ok: true }))
+      .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message.type === "DATA_SYNC_SETTINGS_CHANGED") {
+    chrome.alarms.clear(DATA_SYNC_ALARM)
       .then(() => sendResponse({ ok: true }))
       .catch(error => sendResponse({ ok: false, error: error.message }));
     return true;
