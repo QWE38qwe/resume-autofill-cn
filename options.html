@@ -197,7 +197,8 @@
   </div>
 </section>
 <section id="api" class="section">
-  <div class="surface settings-card">
+  <div class="settings-group" role="presentation">AI</div>
+<div class="surface settings-card">
     <div class="surface-head">
       <div>
         <h2>AI 模型</h2>
@@ -215,7 +216,9 @@
     </div>
     <div id="aiRuleList"></div>
   </div>
-  <div class="surface settings-card">
+  
+  <div class="settings-group" role="presentation">邮箱与同步</div>
+<div class="surface settings-card">
     <div class="surface-head">
       <div><h2>126 / 163 IMAP</h2></div>
     </div>
@@ -250,24 +253,29 @@
       </div>
     </details>
   </div>
-  <div class="surface settings-card data-migration-card">
-    <div class="surface-head"><div><h2>数据迁移</h2></div></div>
-    <div class="migration-actions">
-      <button class="btn primary" id="exportDataBackup">导出 JSON</button>
-      <label class="btn secondary" for="importDataBackup">导入 JSON</label>
-      <input id="importDataBackup" type="file" accept=".json,application/json">
-    </div>
-  </div>
   <div class="surface settings-card">
     <div class="surface-head">
       <div><h2>邮件运行方式</h2></div>
     </div>
     <div class="sync-preferences">
-      <label class="switch-row"><input id="mailAutoSync" type="checkbox"><span><b>启用自动同步</b><small>仅在浏览器运行期间触发</small></span></label>
-      <div class="field"><label for="mailSyncIntervalHours">自动同步间隔（小时）</label><input id="mailSyncIntervalHours" type="number" min="0.5" max="168" step="0.5" value="12"></div>
-      <div class="field"><label for="mailLookbackHours">邮件捕捉周期（小时）</label><input id="mailLookbackHours" type="number" min="1" max="720" step="1" value="24"></div>
+      <label class="switch-row"><input id="mailAutoSync" type="checkbox"><span><b>启用自动同步</b></span></label>
+      <div class="field"><label for="mailSyncIntervalHours">同步间隔</label><input id="mailSyncIntervalHours" type="number" min="0.5" max="168" step="0.5" value="12"></div>
+      <div class="field"><label for="mailLookbackHours">回看窗口</label><input id="mailLookbackHours" type="number" min="1" max="720" step="1" value="24"></div>
     </div>
-    <div class="settings-actions"><span></span><button class="btn primary" id="saveMailSettings">保存邮件设置</button></div>
+    <div class="settings-actions"><span></span><button class="btn primary" id="saveMailSettings">保存</button></div>
+  </div>
+  
+  <div class="settings-group" role="presentation">数据与本地</div>
+<div class="surface settings-card data-migration-card">
+    <div class="surface-head"><div><h2>数据迁移</h2></div></div>
+    <div class="migration-actions">
+      <button class="btn primary" id="exportDataBackup">导出 JSON</button>
+      <label class="btn secondary" for="importDataBackup">导入 JSON</label>
+      <input id="importDataBackup" type="file" accept=".json,application/json">
+      <label class="btn secondary" for="importResumeMarkdown">导入 MD 简历</label>
+      <input id="importResumeMarkdown" type="file" accept=".md,.txt,text/markdown,text/plain">
+<div id="mdImportStatus" class="parse-status" aria-live="polite"></div>
+    </div>
   </div>
   <div class="surface settings-card native-install-card">
     <div class="surface-head">
@@ -289,6 +297,7 @@
   <div id="modal" class="modal" role="dialog" aria-modal="true"><div class="modal-box"><div id="modalBody"></div></div></div>
   <script src="vendor/fflate.min.js"></script>
   <script src="scripts/readme-demo.js"></script>
+  <script src="scripts/md-resume-parse.js"></script>
   <script src="manager.js"></script>
 </body>
 </html>

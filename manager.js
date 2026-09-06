@@ -2187,26 +2187,60 @@ $("#parseResume").addEventListener("click", async () => {
     const text = await extractResumeText(file);
     if (text.trim().length < 30) throw new Error("没有读取到足够的简历文本，请确认文件不是扫描图片");
     const localDraft = parseResumeLocally(text, file.name);
-    if (providers.length) {
+    const localWorks = splitInternshipsIfMerged(localDraft.internships, text);
+    // Structured resumes (clear 实习经历 headers) should trust local split first —
+    // AI often merges segments or leaks 学术成果 on noisy PDF text.
+    if (localWorks.length >= 2) {
+      parsedDraft = {
+        ...localDraft,
+        internships: localWorks,
+        personal: { name: "", email: "" },
+        education: null,
+        parseSource: "local"
+      };
+      setParseStatus(`已按「实习经历」识别 ${localWorks.length} 段：${localWorks.map(item => item.company || item.position || "?").join(" / ")}`, "success");
+    } else if (providers.length) {
       const permitted = await ensureProviderPermissions(providers);
       if (permitted) {
-        setParseStatus(`已读取 ${text.length.toLocaleString()} 个字符，正在提取简历信息…`);
+        setParseStatus(`已读取 ${text.length.toLocaleString()} 个字符，正在提取关键信息…`);
         try {
+          const aiDraft = await parseInternships(text, file.name, providers);
+          const aiWorks = splitInternshipsIfMerged(aiDraft.internships || [], text)
+            .filter(work => !/学术|论文|助理/.test(`${work.company}${work.position}${work.description}`));
           parsedDraft = {
-            ...(await parseInternships(text, file.name, providers)),
-            personal: localDraft.personal,
-            education: localDraft.education,
-            parseSource: "ai"
+            ...aiDraft,
+            internships: aiWorks.length >= localWorks.length ? aiWorks : localWorks,
+            personal: { name: "", email: "" },
+            education: null,
+            parseSource: aiWorks.length >= localWorks.length ? "ai" : "local"
           };
         } catch (error) {
-          if (!localDraft.internships.length) throw error;
-          parsedDraft = localDraft;
+          if (!localWorks.length) throw error;
+          parsedDraft = {
+            ...localDraft,
+            internships: localWorks,
+            personal: { name: "", email: "" },
+            education: null,
+            parseSource: "local"
+          };
         }
       } else {
-        parsedDraft = localDraft;
+        parsedDraft = {
+          ...localDraft,
+          internships: localWorks,
+          personal: { name: "", email: "" },
+          education: null,
+          parseSource: "local"
+        };
       }
     } else {
-      parsedDraft = localDraft;
+      parsedDraft = {
+        ...localDraft,
+        internships: localWorks,
+        personal: { name: "", email: "" },
+        education: null,
+        parseSource: "local"
+      };
     }
     if (!parsedDraft.internships.length) {
       throw new Error("未识别到实习经历，请确认简历中包含起止时间和公司信息");
@@ -2218,8 +2252,12 @@ $("#parseResume").addEventListener("click", async () => {
       parsedDraft.resumeFileWarning = error.message || "原文件无法绑定为简历附件";
     }
     renderParsedDraft();
+    const companyPreview = parsedDraft.internships
+      .map(item => item.company || item.position || "?")
+      .filter(Boolean)
+      .join(" / ");
     setParseStatus(
-      `解析完成：识别到 ${parsedDraft.internships.length} 段实习经历${parsedDraft.parseSource === "local" ? "（本地解析）" : ""}${parsedDraft.resumeFileWarning ? `；${parsedDraft.resumeFileWarning}` : ""}`,
+      `解析完成：识别到 ${parsedDraft.internships.length} 段实习经历${parsedDraft.parseSource === "local" ? "（本地解析）" : ""}${companyPreview ? `：${companyPreview}` : ""}${parsedDraft.resumeFileWarning ? `；${parsedDraft.resumeFileWarning}` : ""}`,
       parsedDraft.resumeFileWarning ? "" : "success"
     );
   } catch (error) {
@@ -2317,8 +2355,13 @@ function normalizeResumeMonth(year, month) {
   return `${year}-${String(month).padStart(2, "0")}`;
 }
 
+function healSpacedDateTokens(value) {
+  // pdf.js sometimes inserts spaces inside dates: "202 4/03-202 4/0 6"
+  return String(value || "").replace(/(\d)\s+(?=\d)/g, "$1");
+}
+
 function resumeDateRange(line) {
-  const match = String(line).match(
+  const match = healSpacedDateTokens(line).match(
     /((?:19|20)\d{2})\s*[./年-]\s*(\d{1,2})\s*月?\s*(?:-|—|–|~|～|至|到)\s*(?:(至今|现在|今)|((?:19|20)\d{2})\s*[./年-]\s*(\d{1,2})\s*月?)/i
   );
   if (!match) return null;
@@ -2362,7 +2405,7 @@ function internshipHeaderValues(line) {
     .replace(/[|｜]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const companyPattern = /[\u3400-\u9fffA-Za-z0-9·（）()]{2,40}(?:公司|集团|银行|科技|研究院|实验室|事务所|中心|工作室)/;
+  const companyPattern = /[\u3400-\u9fffA-Za-z0-9·（）()]{2,40}(?:公司|集团|银行|证券|科技|海通|跳动|研究院|实验室|事务所|中心|工作室|学院)/;
   const company = clean.match(companyPattern)?.[0] || "";
   const parts = clean.split(/\s+/).filter(Boolean);
   const position = parts.find(part =>
@@ -2376,54 +2419,269 @@ function internshipHeaderValues(line) {
   };
 }
 
-function localInternships(resumeText) {
-  const lines = resumeTextLines(resumeText);
-  const startIndex = lines.findIndex(line => /^(实习|工作)(经历|经验)/.test(line));
-  const sectionStart = startIndex >= 0 ? startIndex + 1 : 0;
-  const endOffset = lines.slice(sectionStart).findIndex(line =>
-    /^(教育|项目|校园|科研|技能|证书|获奖|荣誉|自我|个人|作品|论文).{0,8}$/.test(line)
-  );
-  const sectionEnd = endOffset >= 0 ? sectionStart + endOffset : lines.length;
-  const section = lines.slice(sectionStart, sectionEnd);
-  const dateIndexes = section
-    .map((line, index) => resumeDateRange(line) ? index : -1)
-    .filter(index => index >= 0);
 
-  return dateIndexes.map((dateIndex, entryIndex) => {
-    const line = section[dateIndex];
-    const range = resumeDateRange(line);
-    const lineWithoutDate = line.replace(range.source, "").replace(/[|｜]/g, " ").trim();
-    const previous = section[dateIndex - 1] || "";
-    const headerLine = lineWithoutDate || previous;
-    const header = internshipHeaderValues(`${headerLine} ${range.source}`);
-    const nextDateIndex = dateIndexes[entryIndex + 1] ?? section.length;
-    let body = section.slice(dateIndex + 1, nextDateIndex);
-    if (entryIndex < dateIndexes.length - 1 && !section[nextDateIndex].replace(resumeDateRange(section[nextDateIndex]).source, "").trim()) {
-      body = body.slice(0, -1);
+function healBrokenPdfLines(lines) {
+  const result = [];
+  const isSectionMarker = (value) => /^(教育背景|教育经历|实习经历|实习经|工作经历|工作经验|科研经历|科研|项目经历|学术成果|AI项目|AI实践|技能|证书|自我评价)/.test(String(value || "").trim());
+  for (const raw of lines) {
+    const line = healSpacedDateTokens(String(raw || "").trim());
+    if (!line) continue;
+    const prev = result[result.length - 1];
+    if (!prev) {
+      result.push(line);
+      continue;
     }
-    const bullets = body
-      .filter(item => item !== headerLine && !/^(实习|工作)(经历|经验)/.test(item))
-      .map(item => item.replace(/^[•●▪◦·\-–—]\s*/, "").trim())
-      .filter(Boolean);
-    return normalizeInternship({
-      ...header,
-      type: "实习",
-      start: range.start,
-      end: range.end,
-      bullets
-    });
-  }).filter(work => work.company || work.position || work.description);
+    if (isSectionMarker(prev) || isSectionMarker(line)) {
+      result.push(line);
+      continue;
+    }
+    const prevDate = resumeDateRange(prev);
+    const curDate = resumeDateRange(line);
+    const prevIsBullet = /^[*●▪◦•·|\-–—]/.test(prev) || /^(业务背景|职责|成果|工作内容)\s*[:：]/.test(prev);
+    const curIsBullet = /^[*●▪◦•·|\-–—]/.test(line) || /^(业务背景|职责|成果|工作内容)\s*[:：]/.test(line);
+    const prevEnds = /[。！？；;!?:：)]$/.test(prev);
+    const curStartsLatin = /^[A-Za-z0-9]/.test(line);
+    const prevEndsLatin = /[A-Za-z0-9]$/.test(prev);
+    const curLooksHeader = (/[|｜]/.test(line) || /(?:公司|集团|银行|证券|科技|跳动|海通|美团|小红书|研究院|实验室|有限公司|中心|学院)/.test(line)) && line.length <= 60;
+    if (!prevDate && !curDate && !curIsBullet && !curLooksHeader && !prevEnds && !(prevIsBullet && curStartsLatin === false && line.length < 4)) {
+      const glue = (prevEndsLatin && curStartsLatin) ? " " : "";
+      result[result.length - 1] = `${prev}${glue}${line.replace(/^[*●▪◦•·|\-–—]\s*/, "")}`;
+      continue;
+    }
+    result.push(line);
+  }
+  return result;
 }
 
+function splitInternshipsIfMerged(internships, resumeText) {
+  const list = Array.isArray(internships) ? internships.filter(Boolean) : [];
+  if (list.length !== 1) return list;
+  const only = list[0];
+  const blob = [only.description, ...(only.bullets || [])].filter(Boolean).join("\n");
+  const lines = healBrokenPdfLines(resumeTextLines(blob));
+  const dateHits = lines
+    .map((line, index) => ({ line, index, range: resumeDateRange(line) }))
+    .filter(item => item.range);
+  // Also try splitting from full resume local parse when AI collapsed everything.
+  const local = localInternships(resumeText);
+  if (local.length >= 2) return local;
+  if (dateHits.length < 2) return list;
+  // Split the single blob by in-description date lines.
+  const chunks = [];
+  for (let i = 0; i < dateHits.length; i += 1) {
+    const cur = dateHits[i];
+    const next = dateHits[i + 1];
+    const headerLine = lines[cur.index];
+    const withoutDate = headerLine.replace(cur.range.source, "").replace(/[|｜]/g, " ").trim();
+    const previous = lines[cur.index - 1] || "";
+    const header = internshipHeaderValues(`${withoutDate || previous} ${cur.range.source}`);
+    const body = lines.slice(cur.index + 1, next ? next.index : lines.length)
+      .map(item => item.replace(/^[*●▪◦•·|\-–—]\s*/, "").trim())
+      .filter(Boolean);
+    chunks.push(normalizeInternship({
+      ...header,
+      type: "实习",
+      start: cur.range.start,
+      end: cur.range.end,
+      bullets: body
+    }));
+  }
+  return chunks.filter(work => work.company || work.position || work.description).length >= 2
+    ? chunks.filter(work => work.company || work.position || work.description)
+    : list;
+}
+
+
+
+function isInternshipSectionTitle(line) {
+  const text = String(line || "").trim();
+  return /实习经历|工作经历|工作经验/.test(text) || /^实习经/.test(text);
+}
+
+function isInternshipSectionEnd(line) {
+  const text = String(line || "").trim();
+  return /^(教育背景|教育经历|教育|项目经历|项目经验|校园经历|科研经历|科研|技能|证书|获奖|荣誉|自我评价|个人总结|作品|论文|学术成果|学术研究|AI项目经历|AI实践|AI项目|其他)([\s\/·•|\-].*)?$/.test(text);
+}
+
+function isAcademicNoiseLine(line) {
+  return /^(学术研究|发表论文|学生助理|论文|专利)\s*[:：]?/.test(String(line || "").trim());
+}
+
+function isDateOnlyLine(line) {
+  const text = String(line || "").trim();
+  const range = resumeDateRange(text);
+  if (!range) return false;
+  return !text.replace(range.source, "").trim();
+}
+
+function isInternshipHeaderLine(line) {
+  const text = String(line || "").trim();
+  if (!text || isInternshipSectionTitle(text) || isInternshipSectionEnd(text) || isAcademicNoiseLine(text)) return false;
+  if (isDateOnlyLine(text)) return false;
+  // Real PDFs usually put company|dept-role on its own line (date on the next line).
+  if (/[|｜]/.test(text)) {
+    const left = text.split(/[|｜]/)[0].replace(resumeDateRange(text)?.source || "", "").trim();
+    if (left.length >= 2 && left.length <= 40) return true;
+  }
+  const range = resumeDateRange(text);
+  const withoutDate = range ? text.replace(range.source, "").trim() : text;
+  if (range && withoutDate.length >= 2) {
+    if (/\s[-–—-]\s/.test(withoutDate) || /实习生|产品经理|研究|分析|承做|助理|专家/.test(withoutDate)) return true;
+    if (/(?:公司|集团|银行|证券|科技|跳动|海通|美团|小红书|研究院|实验室|中心|学院)/.test(withoutDate)) return true;
+    if (withoutDate.length <= 48) return true;
+  }
+  // Dash-only org headers without pipe, e.g. 复旦大学泛海学院 - 绿色金融研究中心
+  if (!range && /[-–—-]/.test(text) && /(?:大学|学院|中心|研究院)/.test(text) && text.length <= 40) return true;
+  return false;
+}
+
+function parseInternshipHeaderLine(line) {
+  const range = resumeDateRange(line);
+  const raw = String(line || "").replace(range?.source || "", "").trim();
+  const clean = raw.replace(/\s+/g, " ");
+  let company = "";
+  let department = "";
+  let position = "";
+  if (/[|｜]/.test(clean)) {
+    const parts = clean.split(/\s*[|｜]\s*/);
+    company = (parts[0] || "").trim();
+    const right = parts.slice(1).join(" | ").trim();
+    const roleSplit = right.split(/\s*[-–—-]\s*/);
+    if (roleSplit.length >= 2) {
+      department = roleSplit.slice(0, -1).join(" - ").trim();
+      position = roleSplit[roleSplit.length - 1].trim();
+    } else {
+      position = right;
+    }
+  } else if (/\s*[-–—-]\s*/.test(clean)) {
+    const roleSplit = clean.split(/\s*[-–—-]\s*/).filter(Boolean);
+    company = (roleSplit[0] || "").trim();
+    position = roleSplit.slice(1).join(" - ").trim();
+  } else {
+    const fallback = internshipHeaderValues(`${clean} ${range?.source || ""}`);
+    company = fallback.company;
+    department = fallback.department;
+    position = fallback.position;
+  }
+  return {
+    company,
+    department,
+    position,
+    start: range?.start || "",
+    end: range?.end || ""
+  };
+}
+
+function normalizeInternshipBody(header, bodyLines) {
+  const bullets = [];
+  let background = "";
+  for (const item of bodyLines) {
+    const line = String(item || "").trim();
+    if (!line || isInternshipSectionTitle(line) || isInternshipHeaderLine(line) || isDateOnlyLine(line)) continue;
+    if (/^业务背景\s*[:：]/.test(line)) {
+      background = line.replace(/^业务背景\s*[:：]\s*/, "").trim();
+      continue;
+    }
+    // PDF often emits a lone bullet glyph on its own line before the content line.
+    if (/^[*●▪◦•·]$/.test(line)) continue;
+    bullets.push(line.replace(/^[*●▪◦•·|\-–—]\s*/, "").trim());
+  }
+  return normalizeInternship({
+    ...header,
+    type: "实习",
+    businessBackground: background,
+    bullets: bullets.filter(Boolean)
+  });
+}
+
+function localInternships(resumeText) {
+  const lines = healBrokenPdfLines(resumeTextLines(resumeText));
+  const startIndex = lines.findIndex(isInternshipSectionTitle);
+  const sectionStart = startIndex >= 0 ? startIndex + 1 : 0;
+  let sectionEnd = lines.length;
+  for (let index = sectionStart; index < lines.length; index += 1) {
+    if (isInternshipSectionEnd(lines[index]) || isAcademicNoiseLine(lines[index])) {
+      sectionEnd = index;
+      break;
+    }
+  }
+  // If the section title was missing/glued, still prefer content before 科研/学术.
+  if (startIndex < 0) {
+    const fallbackEnd = lines.findIndex((line, index) => index > 0 && (isInternshipSectionEnd(line) || isAcademicNoiseLine(line)));
+    if (fallbackEnd > 0) sectionEnd = fallbackEnd;
+  }
+  const section = lines.slice(sectionStart, sectionEnd).filter(line => !isAcademicNoiseLine(line));
+
+  const headerIndexes = [];
+  for (let index = 0; index < section.length; index += 1) {
+    if (isInternshipHeaderLine(section[index])) headerIndexes.push(index);
+  }
+
+  const entries = [];
+  for (let i = 0; i < headerIndexes.length; i += 1) {
+    const headerIndex = headerIndexes[i];
+    const nextHeaderIndex = headerIndexes[i + 1] ?? section.length;
+    let header = parseInternshipHeaderLine(section[headerIndex]);
+    let bodyStart = headerIndex + 1;
+    if ((!header.start || !header.end) && bodyStart < nextHeaderIndex && isDateOnlyLine(section[bodyStart])) {
+      const range = resumeDateRange(section[bodyStart]);
+      header = { ...header, start: range.start, end: range.end };
+      bodyStart += 1;
+    }
+    const body = section.slice(bodyStart, nextHeaderIndex);
+    const work = normalizeInternshipBody(header, body);
+    const blob = `${work.company}${work.department}${work.position}${work.description}`;
+    const looksContact = /@|微信|每周|意向岗位|产品经理\|不限Base|不限Base/.test(blob) && !work.start;
+    const looksEducation = (/大学|学院/.test(work.company) && /学士|硕士|博士|本科|研究生|金融学/.test(`${work.department}${work.position}`))
+      || (/学士|硕士|博士/.test(`${work.position}${work.department}`) && /大学/.test(work.company));
+    const isResearchCenter = /研究中心|实验室|研究院/.test(blob);
+    if (looksContact || (looksEducation && !isResearchCenter)) continue;
+    if (!(work.start || work.end)) continue;
+    // Drop pure research-paper rows that leaked after a weak section end.
+    if (/管理世界|CSSCI|发表/.test(blob) && /化债|论文|期刊/.test(blob)) continue;
+    if (work.company || work.position || work.description) entries.push(work);
+  }
+  if (entries.length) return entries;
+
+  const dateIndexes = section
+    .map((line, index) => (resumeDateRange(line) ? index : -1))
+    .filter(index => index >= 0);
+  return dateIndexes.map((dateIndex, entryIndex) => {
+    const dateLine = section[dateIndex];
+    const prevLine = section[dateIndex - 1] || "";
+    const headerLine = isDateOnlyLine(dateLine) ? prevLine : dateLine;
+    const range = resumeDateRange(dateLine);
+    const header = {
+      ...parseInternshipHeaderLine(headerLine),
+      start: range?.start || "",
+      end: range?.end || ""
+    };
+    const nextDateIndex = dateIndexes[entryIndex + 1] ?? section.length;
+    const body = section.slice(dateIndex + 1, nextDateIndex);
+    return normalizeInternshipBody(header, body);
+  }).filter(work => {
+    if (!(work.start || work.end)) return false;
+    if (/@|微信|每周/.test(`${work.company}${work.position}`)) return false;
+    if (/大学/.test(work.company) && /学士|硕士|金融学/.test(`${work.department}${work.position}`) && !/研究中心/.test(`${work.company}${work.position}`)) return false;
+    return work.company || work.position || work.description;
+  });
+}
+
+
+
+
+
 function parseResumeLocally(resumeText, fileName) {
-  const basics = resumeBasics(resumeText);
+  // Resume-version parse is internship-only. Labeled MD import has its own path
+  // (parseLabeledResumeMarkdown) and must not hijack PDF/text upload parsing.
   return {
     versionName: fileName.replace(/\.[^.]+$/, ""),
     attachment: fileName,
     internships: localInternships(resumeText),
-    personal: basics.personal,
-    education: basics.education,
-    parseSource: "local"
+    personal: { name: "", email: "" },
+    education: null,
+    parseSource: "local",
+    parserBuild: "2026-09-07-pdfjs-headers"
   };
 }
 
@@ -2490,12 +2748,13 @@ async function parseInternships(resumeText, fileName, providers) {
 }
 
 严格要求：
-1. businessBackground 必须完整保留该段实习中的“业务背景”原文；不得总结、缩写或并入其他职责。
-2. bullets 必须覆盖该段实习下的全部职责和成果，每个圆点或分条单独成为一个数组元素。
-3. 保留每条中的小标题、冒号、数字、百分比、英文缩写和因果链，不得压缩为一句概述。
-4. PDF 换行只是排版换行时，应还原为同一条；只有新的职责/成果条目才拆分。
-5. 不提取教育、校园、项目、论文、技能、证书、自我评价等其他部分。
-6. 不确定的字段使用空字符串，不得编造。只返回 JSON。`;
+1. 有几段不同公司或不同起止时间的实习，就必须输出几个 internships 元素；严禁把多段实习合并成一段。
+2. businessBackground 必须完整保留该段实习中的“业务背景”原文；不得总结、缩写或并入其他职责。
+3. bullets 必须覆盖该段实习下的全部职责和成果；每个圆点/条目一个数组元素。
+4. 保留小标题、冒号、数字、百分比、英文缩写和因果链，不得压缩成概述。
+5. PDF 排版换行要拼回同一条完整句子；不要把半句话拆成两条 bullets。只有新的职责/成果条目才拆分。
+6. 不提取姓名、邮箱、教育、校园、项目、论文、技能、证书、自我评价。
+7. 不确定字段用空字符串，不得编造。只返回 JSON。`;
 
   const body = {
     temperature: 0,
@@ -2522,10 +2781,11 @@ async function parseInternships(resumeText, fileName, providers) {
   const internships = Array.isArray(json.internships) ? json.internships : [];
   if (!internships.length) throw new Error("未识别到实习经历，请确认简历中包含“实习经历”部分");
 
+  const normalized = internships.map(normalizeInternship);
   return {
     versionName: fileName.replace(/\.[^.]+$/, ""),
     attachment: fileName,
-    internships: internships.map(normalizeInternship)
+    internships: splitInternshipsIfMerged(normalized, resumeText)
   };
 }
 
@@ -2578,12 +2838,7 @@ function renderParsedDraft() {
         <div class="field"><label>新版本名称</label><input id="parsedVersionName" value="${safe(parsedDraft.versionName)}"></div>
         <button class="btn primary" id="createParsedVersion">确认并创建版本</button>
       </div>
-      <div class="parsed-basics">
-        <div class="field"><label>姓名</label><input data-parsed-basic="name" value="${safe(parsedDraft.personal?.name || "")}"></div>
-        <div class="field"><label>邮箱</label><input data-parsed-basic="email" value="${safe(parsedDraft.personal?.email || "")}"></div>
-        <div class="field"><label>学校</label><input data-parsed-basic="school" value="${safe(parsedDraft.education?.school || "")}"></div>
-        <div class="field"><label>专业</label><input data-parsed-basic="major" value="${safe(parsedDraft.education?.major || "")}"></div>
-      </div>
+
       ${parsedDraft.internships.map((work, index) => `
         <div class="parsed-work" data-parsed-work="${index}">
           <div class="record-title">
@@ -2662,18 +2917,7 @@ async function createVersionFromParsed() {
   const previousActiveProfileId = db.activeProfileId;
   const previousPersonal = { ...(db.personal || {}) };
   const previousEducation = [...(db.education || [])];
-  const basics = readParsedBasics();
-  db.personal = { ...(db.personal || {}) };
-  ["name", "email"].forEach(key => {
-    if (!String(db.personal[key] || "").trim() && basics[key]) db.personal[key] = basics[key];
-  });
-  if (!db.education.length && basics.school) {
-    db.education.push({
-      school: basics.school,
-      major: basics.major || ""
-    });
-  }
-  db.profiles.push(profile);
+  // Resume-version parse is internship-only: never overwrite personal/education here.
   db.activeProfileId = profile.id;
   try {
     await chrome.storage.local.set({
@@ -2704,6 +2948,157 @@ async function createVersionFromParsed() {
   renderVersions();
   $("#versionEditor").scrollIntoView({ behavior: "smooth", block: "start" });
 }
+
+function setMdImportStatus(message, state = "") {
+  const node = $("#mdImportStatus");
+  if (!node) {
+    if (message) toast(message, state === "error" ? "error" : "info");
+    return;
+  }
+  node.textContent = message;
+  node.className = `parse-status ${state}`.trim();
+}
+
+function mergePersonalFields(target, source = {}) {
+  const next = { ...(target || {}) };
+  Object.entries(source || {}).forEach(([key, value]) => {
+    const text = String(value || "").trim();
+    if (!text) return;
+    if (!String(next[key] || "").trim()) next[key] = text;
+  });
+  return next;
+}
+
+function appendUniqueRecords(existing, incoming, keyFn) {
+  const list = Array.isArray(existing) ? [...existing] : [];
+  const seen = new Set(list.map(keyFn));
+  for (const item of incoming || []) {
+    const key = keyFn(item);
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    list.push(item);
+  }
+  return list;
+}
+
+async function applyLabeledMarkdownImport(parsed) {
+  await downloadMigrationBackup("\u7b80\u586bMD\u5bfc\u5165\u524d\u56de\u6eda");
+  const previous = {
+    personal: { ...(db.personal || {}) },
+    education: [...(db.education || [])],
+    projects: [...(db.projects || [])],
+    awards: [...(db.awards || [])],
+    languages: [...(db.languages || [])],
+    hobbies: db.hobbies || "",
+    profiles: [...(db.profiles || [])],
+    activeProfileId: db.activeProfileId
+  };
+
+  db.personal = mergePersonalFields(db.personal, parsed.personal);
+  db.education = appendUniqueRecords(db.education, parsed.education, item =>
+    `${item.school || ""}|${item.major || ""}|${item.level || ""}|${item.start || ""}`
+  );
+  db.projects = appendUniqueRecords(db.projects, parsed.projects, item =>
+    `${item.name || ""}|${item.start || ""}|${(item.content || "").slice(0, 40)}`
+  );
+  db.awards = appendUniqueRecords(db.awards, parsed.awards, item =>
+    `${item.name || ""}|${item.date || ""}`
+  );
+  db.languages = appendUniqueRecords(db.languages, parsed.languages, item =>
+    `${item.language || ""}|${item.proficiency || ""}`
+  );
+  if (!String(db.hobbies || "").trim() && parsed.summary) db.hobbies = parsed.summary;
+  if (!String(db.personal.specialty || "").trim() && parsed.summary) {
+    db.personal.specialty = parsed.summary;
+  }
+
+  const works = (parsed.internships || []).map(work => ({
+    company: work.company || "",
+    department: work.department || "",
+    position: work.position || "",
+    type: work.type || "\u5b9e\u4e60",
+    city: work.city || "",
+    start: work.start || "",
+    end: work.end || "",
+    description: work.description || ""
+  }));
+  if (works.length) {
+    const profile = {
+      id: crypto.randomUUID(),
+      name: parsed.versionName || "MD\u5bfc\u5165\u7248\u672c",
+      target: "",
+      summary: parsed.summary || "",
+      attachment: parsed.attachment || "",
+      resumePath: "",
+      resumeFile: null,
+      work: works,
+      openQuestions: []
+    };
+    db.profiles = db.profiles || [];
+    db.profiles.push(profile);
+    if (!db.activeProfileId) db.activeProfileId = profile.id;
+  }
+
+  try {
+    await chrome.storage.local.set({
+      personal: db.personal,
+      education: db.education,
+      projects: db.projects,
+      awards: db.awards,
+      languages: db.languages,
+      hobbies: db.hobbies,
+      profiles: db.profiles,
+      activeProfileId: db.activeProfileId
+    });
+  } catch (error) {
+    Object.assign(db, previous);
+    throw new Error(`\u5199\u5165\u5931\u8d25\uff1a${error.message || error}`);
+  }
+
+  renderBasic();
+  ["education", "projects", "awards", "languages"].forEach(type => renderList(type));
+  if ($("#hobbiesText")) $("#hobbiesText").value = db.hobbies || "";
+  renderVersions();
+  return parsed.stats || {};
+}
+
+async function importResumeMarkdownFile(file) {
+  if (typeof parseLabeledResumeMarkdown !== "function") {
+    throw new Error("MD \u89e3\u6790\u6a21\u5757\u672a\u52a0\u8f7d");
+  }
+  const text = await file.text();
+  if (text.trim().length < 30) throw new Error("MD \u5185\u5bb9\u8fc7\u77ed\uff0c\u8bf7\u786e\u8ba4\u6587\u4ef6\u6709\u6548");
+  const parsed = parseLabeledResumeMarkdown(text, file.name);
+  const stats = parsed.stats || {};
+  const total = (stats.education || 0) + (stats.internships || 0) + (stats.projects || 0) + (stats.personalFields || 0);
+  if (total <= 0 && !stats.hasSummary) {
+    throw new Error("\u672a\u8bc6\u522b\u5230\u53ef\u5bfc\u5165\u7684\u7b80\u5386\u5b57\u6bb5");
+  }
+  return applyLabeledMarkdownImport(parsed);
+}
+
+$("#importResumeMarkdown")?.addEventListener("change", async event => {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  const label = document.querySelector('label[for="importResumeMarkdown"]');
+  setMigrationBusy(true, label);
+  setMdImportStatus("\u6b63\u5728\u89e3\u6790 MD \u5e76\u5199\u5165\u8d44\u6599\u5e93\u2026");
+  try {
+    const stats = await importResumeMarkdownFile(file);
+    setMdImportStatus(
+      `\u5df2\u5bfc\u5165\uff1a\u4e2a\u4eba\u4fe1\u606f ${stats.personalFields || 0} \u9879\uff0c\u6559\u80b2 ${stats.education || 0}\uff0c\u5b9e\u4e60/\u5de5\u4f5c ${stats.internships || 0}\uff0c\u9879\u76ee ${stats.projects || 0}\uff0c\u8bed\u8a00 ${stats.languages || 0}\uff0c\u83b7\u5956 ${stats.awards || 0}`,
+      "success"
+    );
+    toast("MD \u7b80\u5386\u5df2\u5bfc\u5165\u8d44\u6599\u5e93", "info");
+  } catch (error) {
+    console.error(error);
+    setMdImportStatus(error.message || "MD \u5bfc\u5165\u5931\u8d25", "error");
+    toast(error.message || "MD \u5bfc\u5165\u5931\u8d25", "error");
+  } finally {
+    setMigrationBusy(false, label);
+  }
+});
 
 async function persistAiSettings() {
   const providers = normalizeAiProviders(db.settings || {});

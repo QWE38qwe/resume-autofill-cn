@@ -1109,3 +1109,38 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   .mail-table-wrap { overflow-x: auto; }
   .mail-table { min-width: 840px; }
 }
+
+.migration-hint { margin: 8px 0 0; line-height: 1.5; }
+#mdImportStatus { margin-top: 8px; }
+
+
+/* settings-ui-d */
+.settings-group {
+  margin: 18px 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--caption);
+}
+.settings-group:first-child { margin-top: 0; }
+#api .surface.settings-card {
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+#api .surface-head { margin-bottom: 10px; }
+#api .surface-head h2 { font-size: 15px; font-weight: 600; }
+#api .surface-head p,
+#api .migration-hint,
+#api .section-kicker,
+#api .switch-row small { display: none !important; }
+#api .form-grid { gap: 10px 12px; }
+#api .field label { font-size: 12px; color: var(--caption); margin-bottom: 4px; }
+#api .field input,
+#api .field select { min-height: 36px; font-size: 14px; }
+#api .btn { min-height: 34px; font-size: 13px; padding: 0 12px; }
+#api .btn.small { min-height: 28px; font-size: 12px; }
+#api .migration-actions { gap: 8px; }
+#api .settings-actions { margin-top: 10px; }
+#api .sync-preferences { gap: 10px; }
+#api .install-command { font-size: 12px; }

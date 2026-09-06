@@ -22,7 +22,7 @@ const FIELD_DEFS = {
   postalCode: ["邮政编码", "邮编", "zip code", "postal code", "postcode"],
   phone: ["手机号码", "手机号", "联系电话", "移动电话", "手机", "mobile", "phone"],
   phoneCountryCode: ["电话区号", "手机区号", "国家区号", "country code", "phone code"],
-  email: ["电子邮箱", "邮箱地址", "邮箱", "email"],
+  email: ["电子邮箱", "邮箱地址", "常用邮箱", "电子信箱", "邮箱", "E-mail", "Email", "email", "mail"],
   wechat: ["微信号", "微信"],
   qq: ["QQ号", "QQ"],
   linkedin: ["LinkedIn", "领英", "领英主页", "linkedin profile", "linkedin url"],
@@ -30,11 +30,11 @@ const FIELD_DEFS = {
   personalWebsite: ["个人网站", "个人主页", "网站", "website", "personal website"],
   portfolioUrl: ["作品集链接", "作品集", "portfolio", "portfolio url"],
   specialty: ["个人特长", "特长"],
-  identityNumber: ["身份证号码", "证件号码", "身份证号"],
+  identityNumber: ["身份证号码", "居民身份证号", "居民身份证号码", "证件号码", "身份证号", "身份证", "id number", "national id"],
   identityType: ["证件类型", "证件类别"],
-  emergencyContactName: ["紧急联系人姓名", "紧急联系人", "emergency contact name"],
-  emergencyContactRelation: ["紧急联系人关系", "与紧急联系人关系", "emergency contact relationship"],
-  emergencyContactPhone: ["紧急联系人电话", "紧急联系人手机号", "emergency contact phone"],
+  emergencyContactName: ["紧急联系人姓名", "紧急联络人姓名", "紧急联系人", "紧急联络人", "联系人姓名", "emergency contact name", "emergency contact"],
+  emergencyContactRelation: ["紧急联系人关系", "与紧急联系人关系", "联系人关系", "emergency contact relationship", "emergency relationship"],
+  emergencyContactPhone: ["紧急联系人电话", "紧急联系人手机号", "紧急联络人电话", "紧急联系人手机", "联系人电话", "联系人手机", "emergency contact phone", "emergency phone"],
   graduationYear: ["毕业年份", "毕业年度", "预计毕业年份", "graduation year"],
   graduationDate: ["毕业日期", "预计毕业时间", "预计毕业日期", "graduation date", "expected graduation date"],
   overseasExperience: ["是否有海外经历", "海外经历", "留学经历", "international experience"],
@@ -61,7 +61,7 @@ const FIELD_DEFS = {
   major: ["专业名称", "所学专业", "就读专业", "专业"],
   educationLevel: ["最高学历", "学历层次", "学历"],
   degree: ["学位"],
-  educationType: ["学历类型", "学习形式", "培养方式"],
+  educationType: ["学历类型", "学习形式", "培养方式", "教育类型", "学制类型", "education type", "study mode", "study form"],
   gpa: ["平均绩点", "绩点", "GPA"],
   rank: ["专业排名", "专业综合排名", "班级排名", "年级排名", "学业排名", "综合排名", "成绩排名", "排名"],
   doubleDegree: ["是否双学位", "双学位", "第二学位", "辅修学位", "dual degree", "double degree"],
@@ -349,6 +349,47 @@ function shortText(element) {
   return text.length <= 80 ? text : "";
 }
 
+
+function precedingLabelText(element, limit = 4) {
+  const pieces = [];
+  let sibling = element.previousElementSibling;
+  for (let index = 0; sibling && index < limit; index += 1, sibling = sibling.previousElementSibling) {
+    if (queryAllDeep(sibling, "input,textarea,select,[role=combobox],.phoenix-select,.ant-select").length) break;
+    const text = shortText(sibling) || directText(sibling);
+    if (text && text.length <= 24) pieces.push(text);
+  }
+  let parent = element.parentElement;
+  for (let depth = 0; parent && depth < 5; depth += 1, parent = parent.parentElement) {
+    const kids = [...parent.children];
+    const index = kids.indexOf(kids.find(node => node.contains(element)) || element);
+    if (index > 0) {
+      for (let back = 1; back <= 2 && index - back >= 0; back += 1) {
+        const node = kids[index - back];
+        if (queryAllDeep(node, "input,textarea,select,[role=combobox],.phoenix-select,.ant-select").length) continue;
+        const text = shortText(node) || directText(node);
+        if (text && text.length <= 24) pieces.push(text);
+      }
+    }
+    if (pieces.length) break;
+    if (controls(parent).length > 1) continue;
+  }
+  return pieces.filter(Boolean).join(" ");
+}
+
+function singleFieldTitle(container, element) {
+  if (!container) return "";
+  const ownControls = controls(container);
+  if (ownControls.length > 1) return "";
+  const raw = String(container.innerText || container.textContent || "").trim();
+  if (!raw) return "";
+  const lines = raw.split(/\n+/).map(line => line.trim()).filter(Boolean);
+  const title = lines.find(line =>
+    line.length <= 16 &&
+    !/^(请输入|请选择|必填|选填|可选|\+?\d[\d\s-]{5,})$/.test(line)
+  );
+  return title || "";
+}
+
 function labelOf(element) {
   const pieces = [];
   const root = ownerRoot(element);
@@ -461,18 +502,38 @@ function labelOf(element) {
     const labels = [...labelNodes]
       .filter(node => !node.contains(element))
       .map(shortText)
-      .filter(Boolean);
+      .filter(Boolean)
+      // Prefer labels that sit with this control, not a whole row of titles.
+      .filter(text => controls(item).length <= 1 || text.length <= 16);
     if (labels.length) {
       pieces.push(...labels.slice(0, 4));
       break;
     }
-    const itemText = shortText(item);
     const itemControls = controls(item);
-    if (itemText && itemControls.length <= 2 && !/^(请输入|请选择|\d+\/\d+)$/.test(itemText)) {
+    // Multi-control rows (e.g. 出生日期 | 邮箱) must not share one blob label,
+    // or both inputs match the same FIELD_DEFS key and the later one is skipped.
+    if (itemControls.length > 1) {
+      const local = singleFieldTitle(item, element) || precedingLabelText(element);
+      if (local) {
+        pieces.push(local);
+        break;
+      }
+      continue;
+    }
+    const titled = singleFieldTitle(item, element);
+    if (titled) {
+      pieces.push(titled);
+      break;
+    }
+    const itemText = shortText(item);
+    if (itemText && !/^(请输入|请选择|\d+\/\d+)$/.test(itemText)) {
       pieces.push(itemText);
       break;
     }
   }
+
+  const nearbyLabel = precedingLabelText(element);
+  if (nearbyLabel) pieces.unshift(nearbyLabel);
 
   if (pieces.length <= 8) {
     let sibling = element.parentElement?.previousElementSibling;
@@ -490,8 +551,15 @@ function aliasScore(label, alias) {
   const target = normalizeText(alias);
   if (!source || !target) return 0;
   if (source === target) return 100;
+  // Standalone label token (common on Beisen 2-column rows).
+  const tokens = String(label || "").split(/\s+/).map(normalizeText).filter(Boolean);
+  if (tokens.includes(target)) return 96;
   if (source.startsWith(target) || source.endsWith(target)) return 88;
-  if (source.includes(target)) return Math.max(62, 82 - Math.floor((source.length - target.length) / 5));
+  if (source.includes(target)) {
+    // Heavily penalize matching inside a multi-field blob like "出生日期请选择邮箱请输入".
+    const penalty = Math.floor((source.length - target.length) / 3);
+    return Math.max(50, 82 - penalty);
+  }
   return 0;
 }
 
@@ -541,33 +609,81 @@ function directText(element) {
 function nearestControlsFromLabel(root, labelNode, key, used) {
   let node = labelNode;
   const wantsLongText = ["description", "content", "duty", "result"].includes(key);
-  for (let depth = 0; node && node !== document.body && node !== root.parentElement && depth < 8; depth += 1, node = node.parentElement) {
-    const candidates = controls(node).filter(control => !used.has(control) && !labelNode.contains(control));
-    if (!candidates.length || candidates.length > 6) continue;
+  const wantsDate = /start|end|date|birthDate|graduationDate|时间|日期/.test(key);
+  // Prefer control in the same field cell: next siblings first.
+  let sibling = labelNode.nextElementSibling;
+  for (let index = 0; sibling && index < 4; index += 1, sibling = sibling.nextElementSibling) {
+    const local = [
+      ...controls(sibling),
+      ...queryAllDeep(sibling, ".phoenix-select,.ant-select,.atsx-select").filter(isVisible)
+    ].filter(control => !used.has(control));
+    if (!local.length) continue;
+    if (wantsDate) {
+      const date = local.find(isDateControl) || local.find(control => componentType(control) === "calendar");
+      if (date) return date;
+    }
     if (wantsLongText) {
-      const textarea = candidates.find(control => control instanceof HTMLTextAreaElement || control.isContentEditable);
+      const textarea = local.find(control => control instanceof HTMLTextAreaElement || control.isContentEditable);
       if (textarea) return textarea;
     }
-    if (/start|end|date|时间|日期/.test(key)) {
-      const date = candidates.find(isDateControl);
+    if (key === "email") {
+      const email = local.find(control =>
+        control instanceof HTMLInputElement && (control.type === "email" || /email|mail|邮箱|邮/.test(normalizeText(`${control.type}${control.placeholder}${control.name}${control.id}`)))
+      );
+      if (email) return email;
+    }
+    return local[0];
+  }
+  for (let depth = 0; node && node !== document.body && node !== root.parentElement && depth < 8; depth += 1, node = node.parentElement) {
+    const candidates = [
+      ...controls(node),
+      ...queryAllDeep(node, ".phoenix-select,.ant-select").filter(el => isVisible(el) && !controls(el).length)
+    ].filter(control => !used.has(control) && !labelNode.contains(control));
+    // Dedupe
+    const uniq = [...new Set(candidates)];
+    if (!uniq.length || uniq.length > 6) continue;
+    if (wantsLongText) {
+      const textarea = uniq.find(control => control instanceof HTMLTextAreaElement || control.isContentEditable);
+      if (textarea) return textarea;
+    }
+    if (wantsDate) {
+      const date = uniq.find(isDateControl) || uniq.find(control => componentType(control) === "calendar");
       if (date) return date;
       continue;
     }
-    return candidates[0];
+    if (key === "email") {
+      const email = uniq.find(control =>
+        control instanceof HTMLInputElement && (control.type === "email" || /mail|邮箱/.test(normalizeText(`${control.placeholder || ""}${control.name || ""}`)))
+      );
+      if (email) return email;
+    }
+    return uniq[0];
   }
   return null;
 }
 
 function findControlNearLabel(root, aliases, key, used) {
   let best = null;
-  queryAllDeep(root, "label,span,div,p,dt,dd").forEach(node => {
-    if (!isVisible(node) || queryAllDeep(node, "input,textarea,select,.atsx-select,[role=combobox]").length) return;
-    const text = `${directText(node)} ${node.getAttribute("aria-label") || ""}`.trim();
+  queryAllDeep(root, "label,span,div,p,dt,dd,th,td,h1,h2,h3,h4,h5,h6").forEach(node => {
+    if (!isVisible(node)) return;
+    if (queryAllDeep(node, "input,textarea,select,.atsx-select,.phoenix-select,[role=combobox]").length) return;
+    const raw = String(
+      directText(node) ||
+      shortText(node) ||
+      node.getAttribute("aria-label") ||
+      ""
+    ).trim();
+    const compact = normalizeText(node.innerText || node.textContent || "");
+    let text = raw;
+    // Beisen often wraps "* 邮箱" as element children; fall back to compact inner text.
+    if ((!text || text.length > 40) && compact && compact.length <= 16) text = (node.innerText || "").trim();
     if (!text || text.length > 80) return;
-    const match = bestAlias(text, aliases);
-    if (!match) return;
+    const match = bestAlias(text, aliases) || bestAlias(compact, aliases);
+    if (!match || match.score < 82) return;
+    // Avoid section titles that merely include the alias.
+    if (compact.length > match.alias.replace(/\s+/g, "").length + 6 && match.score < 96) return;
     const control = nearestControlsFromLabel(root, node, key, used);
-    if (control && (!best || match.score > best.score)) best = { element: control, score: match.score };
+    if (control && (!best || match.score > best.score)) best = { element: control, score: match.score, alias: match.alias };
   });
   return best?.element || null;
 }
@@ -1025,6 +1141,103 @@ function panelNumber(selector) {
   return match ? Number(match[0]) : 0;
 }
 
+
+async function choosePhoenixDate(element, value) {
+  const match = String(value || "").match(/(\d{4})\D{0,3}(\d{1,2})\D{0,3}(\d{1,2})/);
+  if (!match) return false;
+  const targetYear = Number(match[1]);
+  const targetMonth = Number(match[2]);
+  const targetDay = Number(match[3]);
+  const host = element.closest?.(".phoenix-select, .phoenix-calendar-picker, .phoenix-input") || element;
+  clickElement(host);
+  await sleep(220);
+
+  // Some Beisen DOB pickers open the date panel directly.
+  let datePanel = visibleOne(".phoenix-calendar-date-panel, .phoenix-calendar");
+  let monthPanel = visibleOne(".phoenix-calendar-month-panel");
+  if (!monthPanel && !datePanel) return false;
+
+  if (!monthPanel) {
+    const monthSwitch = visibleOne(".phoenix-calendar-month-select");
+    if (monthSwitch) {
+      clickElement(monthSwitch);
+      await sleep(140);
+      monthPanel = visibleOne(".phoenix-calendar-month-panel");
+    }
+  }
+
+  if (monthPanel) {
+    let shownYear = panelNumber(".phoenix-calendar-month-panel-year-select-content");
+    if (shownYear !== targetYear) {
+      const yearSwitch = visibleOne(".phoenix-calendar-month-panel-year-select");
+      if (yearSwitch) {
+        clickElement(yearSwitch);
+        await sleep(140);
+        let yearPanel = visibleOne(".phoenix-calendar-year-panel");
+        for (let attempt = 0; yearPanel && attempt < 12; attempt += 1) {
+          const decadeText = (yearPanel.querySelector(".phoenix-calendar-year-panel-decade-select-content")?.textContent || "").trim();
+          const years = decadeText.match(/\d{4}/g)?.map(Number) || [];
+          if (years.length >= 2 && targetYear < years[0]) {
+            clickElement(yearPanel.querySelector(".phoenix-calendar-year-panel-prev-decade-btn"));
+            await sleep(90);
+          } else if (years.length >= 2 && targetYear > years[years.length - 1]) {
+            clickElement(yearPanel.querySelector(".phoenix-calendar-year-panel-next-decade-btn"));
+            await sleep(90);
+          } else break;
+          yearPanel = visibleOne(".phoenix-calendar-year-panel");
+        }
+        const yearCell = [...(yearPanel?.querySelectorAll(".phoenix-calendar-year-panel-cell") || [])]
+          .find(cell => normalizeText(cell.textContent) === String(targetYear) && !cell.classList.contains("phoenix-calendar-year-panel-disabled-cell"));
+        if (yearCell) {
+          clickElement(yearCell);
+          await sleep(140);
+          monthPanel = visibleOne(".phoenix-calendar-month-panel");
+        }
+      }
+    }
+    const cells = [...(monthPanel?.querySelectorAll(".phoenix-calendar-month-panel-cell") || [])];
+    const monthCell = cells[targetMonth - 1];
+    if (monthCell && !monthCell.classList.contains("phoenix-calendar-month-panel-cell-disabled")) {
+      clickElement(monthCell);
+      await sleep(180);
+    }
+  }
+
+  datePanel = visibleOne(".phoenix-calendar-date-panel, .phoenix-calendar");
+  if (!datePanel) return Boolean(String(controlCurrentValue(element) || "").trim());
+  // navigate months if header year/month mismatch
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    const header = normalizeText(
+      datePanel.querySelector(".phoenix-calendar-ym-select, .phoenix-calendar-month-select, .phoenix-calendar-year-select")?.textContent ||
+      datePanel.textContent
+    );
+    const year = Number(header.match(/(\d{4})/)?.[1] || 0);
+    const month = Number(header.match(/(\d{1,2})\s*月/)?.[1] || 0);
+    if (year === targetYear && (!month || month === targetMonth)) break;
+    const newer = !year || year < targetYear || (year === targetYear && month && month < targetMonth);
+    const btn = datePanel.querySelector(newer
+      ? ".phoenix-calendar-next-month-btn, .phoenix-calendar-next-year-btn"
+      : ".phoenix-calendar-prev-month-btn, .phoenix-calendar-prev-year-btn");
+    if (!btn) break;
+    clickElement(btn);
+    await sleep(70);
+    datePanel = visibleOne(".phoenix-calendar-date-panel, .phoenix-calendar");
+    if (!datePanel) break;
+  }
+  const dayCell = [...(datePanel?.querySelectorAll(".phoenix-calendar-cell") || [])]
+    .find(cell =>
+      normalizeText(cell.querySelector(".phoenix-calendar-date")?.textContent) === String(targetDay) &&
+      !cell.classList.contains("phoenix-calendar-last-month-cell") &&
+      !cell.classList.contains("phoenix-calendar-next-month-btn-day") &&
+      !cell.classList.contains("phoenix-calendar-disabled-cell")
+    );
+  if (!dayCell) return false;
+  clickElement(dayCell);
+  await sleep(180);
+  const selected = controlCurrentValue(element);
+  return Boolean(selected && !isPlaceholderValue(selected));
+}
+
 async function choosePhoenixMonth(element, value) {
   if (!element.closest(".phoenix-select")) return false;
   const date = splitDate(value);
@@ -1194,6 +1407,122 @@ function checkboxIsChecked(element) {
   return element?.getAttribute?.("aria-checked") === "true" ||
     element?.classList?.contains("checked") ||
     Boolean(element?.querySelector?.("input[type=checkbox]:checked,[role=checkbox][aria-checked=true]"));
+}
+
+
+async function fillBeisenPhoenixDateRange(block, record, overwrite, used) {
+  const rangeLabelRe = /起止时间|任职时间|在职时间|实习时间|工作时间|起止日期|时间段/;
+  const formItems = queryAllDeep(block, [
+    ".form-item",
+    ".form-wrap",
+    ".ant-form-item",
+    ".el-form-item",
+    ".ivu-form-item",
+    ".form-group",
+    ".form-field",
+    "[class*='FormItem']",
+    "[class*='formItem']",
+    "[class*='FormField']",
+    "[class*='fieldItem']",
+    "[class*='FieldItem']"
+  ].join(",")).filter(isVisible);
+
+  let host = null;
+  for (const item of formItems) {
+    const titleNode = item.querySelector([
+      ".form-tit",
+      ".form-item__title",
+      ".ant-form-item-label",
+      ".el-form-item__label",
+      ".ivu-form-item-label",
+      "label",
+      "[class*='label']",
+      "[class*='Label']",
+      "[class*='title']",
+      "[class*='Title']"
+    ].join(","));
+    const title = normalizeText(shortText(titleNode) || shortText(item));
+    if (rangeLabelRe.test(title)) {
+      host = item;
+      break;
+    }
+  }
+  if (!host) {
+    const labeled = controls(block).find(control =>
+      !used.has(control) && rangeLabelRe.test(normalizeText(`${labelOf(control)} ${nearbyTextOf(control, block)}`))
+    );
+    if (labeled) {
+      host = labeled.closest([
+        ".form-item", ".form-wrap", ".ant-form-item", ".el-form-item", ".ivu-form-item",
+        ".form-group", ".form-field", "[class*='FormItem']", "[class*='formItem']"
+      ].join(",")) || labeled.parentElement;
+    }
+  }
+  if (!host) return { handled: false, filled: 0, failed: 0 };
+
+  let dateControls = dateLayoutControls(host).filter(control => !used.has(control));
+  if (dateControls.length < 2) {
+    const phoenixInputs = queryAllDeep(host, [
+      ".phoenix-select input",
+      ".phoenix-calendar-picker input",
+      ".phoenix-input input",
+      "input[placeholder*='开始']",
+      "input[placeholder*='结束']",
+      "input[placeholder*='起始']",
+      "input[placeholder*='截止']"
+    ].join(",")).filter(node => node instanceof HTMLInputElement && isVisible(node) && !used.has(node));
+    dateControls = [...new Set([...dateControls, ...phoenixInputs])];
+  }
+  if (dateControls.length < 2) {
+    const rangeWrapper = queryAllDeep(host, [
+      ".phoenix-calendar-picker",
+      ".atsx-calendar-picker",
+      ".ant-picker-range",
+      ".ant-calendar-range-picker",
+      "[class*='DateRange']",
+      "[class*='date-range']",
+      "[class*='daterange']"
+    ].join(",")).find(isVisible);
+    if (rangeWrapper) {
+      const inputs = [...rangeWrapper.querySelectorAll("input:not([type=hidden])")]
+        .filter(input => isVisible(input) && !used.has(input))
+        .slice(0, 2);
+      if (inputs.length >= 2) dateControls = inputs;
+    }
+  }
+  if (dateControls.length < 2) return { handled: false, filled: 0, failed: 0 };
+
+  const startControl = dateControls[0];
+  const endControl = dateControls[1];
+  used.add(startControl);
+  used.add(endControl);
+
+  let filled = 0;
+  let failed = 0;
+  const fillOne = async (control, value, boundary) => {
+    if (!value) {
+      if (boundary === "end" && recordWantsPresent(record)) return;
+      failed += 1;
+      return;
+    }
+    if (!overwrite && !isBlankControl(control)) return;
+    const formatted = dateValueForBoundary(value, boundary, control);
+    let ok = await choosePhoenixMonth(control, formatted);
+    if (!ok) ok = await chooseAntMonth(control, formatted);
+    if (!ok) ok = await chooseAntDate(control, formatted);
+    if (!ok) {
+      forceNativeValue(control, formatDateValue(control, formatted));
+      await sleep(120);
+      const current = controlCurrentValue(control);
+      ok = Boolean(String(current || "").trim()) && !isPlaceholderValue(current);
+    }
+    if (ok) filled += 1;
+    else failed += 1;
+  };
+
+  await fillOne(startControl, record.start, "start");
+  await fillOne(endControl, record.end, "end");
+  return { handled: true, filled, failed };
 }
 
 async function fillAtsxDateRange(block, record, overwrite, used) {
@@ -1841,7 +2170,9 @@ async function fillDateLikeControl(element, value) {
   if (!/日期|时间|年月|date|month|到岗|入职|开始|结束|有效期|到期|毕业|实习至/.test(label) &&
     !/date|month/.test(element.type || "")) return false;
   if (!/^\d{4}-\d{1,2}/.test(formatted)) return false;
+  if (/\d{4}\D+\d{1,2}\D+\d{1,2}/.test(String(value || "")) && await choosePhoenixDate(element, value)) return true;
   if (await choosePhoenixMonth(element, value)) return true;
+  if (await chooseAntMonth(element, value)) return true;
   if (await chooseAntDate(element, value)) return true;
   forceNativeValue(element, formatted);
   await sleep(100);
@@ -2202,8 +2533,8 @@ async function fillWorkByLayout(block, record, overwrite, used) {
   const diagnostics = [];
   const handledKeys = new Set();
   const blockControls = controls(block);
-  const startAliases = ["开始时间", "起始时间", "开始日期", "起止时间", "start date", "from"];
-  const endAliases = ["结束时间", "结束日期", "end date", "to"];
+  const startAliases = ["开始时间", "起始时间", "开始日期", "入职时间", "start date", "from"];
+  const endAliases = ["结束时间", "截止时间", "结束日期", "离职时间", "end date", "to"];
   const dateControls = dateLayoutControls(block);
   const textareas = blockControls.filter(control => control instanceof HTMLTextAreaElement || control.isContentEditable);
   const startControl = findControlNearLabel(block, startAliases, "start", new Set()) || dateControls[0];
@@ -2231,20 +2562,26 @@ async function fillWorkByLayout(block, record, overwrite, used) {
   }
 
   const bilibiliResult = await fillBilibiliDateRange(block, record, overwrite, used);
-  const periodResult = bilibiliResult.handled
+  const beisenResult = bilibiliResult.handled
+    ? { handled: false, filled: 0, failed: 0 }
+    : await fillBeisenPhoenixDateRange(block, record, overwrite, used);
+  const periodResult = bilibiliResult.handled || beisenResult.handled
     ? { handled: false, filled: 0, failed: 0 }
     : await fillAtsxPeriodMonthRange(block, record, overwrite, used);
-  const throneResult = bilibiliResult.handled || periodResult.handled
+  const throneResult = bilibiliResult.handled || beisenResult.handled || periodResult.handled
     ? { handled: false, filled: 0, failed: 0 }
     : await fillThroneDateRange(block, record, overwrite, used);
-  const atsxResult = bilibiliResult.handled || periodResult.handled || throneResult.handled
+  const atsxResult = bilibiliResult.handled || beisenResult.handled || periodResult.handled || throneResult.handled
     ? { handled: false, filled: 0, failed: 0 }
     : await fillAtsxDateRange(block, record, overwrite, used);
-  let dateFailed = bilibiliResult.failed + periodResult.failed + throneResult.failed + atsxResult.failed;
+  let dateFailed = bilibiliResult.failed + beisenResult.failed + periodResult.failed + throneResult.failed + atsxResult.failed;
   let partsResult = { filled: 0, failed: 0, handled: false };
   if (bilibiliResult.handled) {
     filled += bilibiliResult.filled;
     notes.push("起止年月（B站月份组件）");
+  } else if (beisenResult.handled) {
+    filled += beisenResult.filled;
+    notes.push("起止年月（北森/智联）");
   } else if (periodResult.handled) {
     filled += periodResult.filled;
     notes.push("起止年月（飞书月份组件）");
@@ -2259,9 +2596,9 @@ async function fillWorkByLayout(block, record, overwrite, used) {
     filled += partsResult.filled;
     dateFailed += partsResult.failed;
   }
-  if (!bilibiliResult.handled && !periodResult.handled && !throneResult.handled && !atsxResult.handled && partsResult.handled) {
+  if (!bilibiliResult.handled && !beisenResult.handled && !periodResult.handled && !throneResult.handled && !atsxResult.handled && partsResult.handled) {
     notes.push("起止年月");
-  } else if (!bilibiliResult.handled && !periodResult.handled && !throneResult.handled && !atsxResult.handled && !partsResult.handled) {
+  } else if (!bilibiliResult.handled && !beisenResult.handled && !periodResult.handled && !throneResult.handled && !atsxResult.handled && !partsResult.handled) {
     if (startControl && record.start && (overwrite || isBlankControl(startControl))) {
       const value = dateValueForBoundary(record.start, "start", startControl);
       const selected = await choosePhoenixMonth(startControl, value);
@@ -2476,10 +2813,12 @@ async function fillYearMonthParts(block, record, overwrite, used) {
 }
 
 async function fillDateRange(block, record, overwrite, used) {
-  const startAliases = ["开始时间", "起始时间", "入学时间", "就读开始时间", "开始日期", "起止时间", "start date", "from"];
+  const startAliases = ["开始时间", "起始时间", "入学时间", "就读开始时间", "开始日期", "start date", "from"];
   const endAliases = ["结束时间", "毕业时间", "离职时间", "就读结束时间", "结束日期", "end date", "to"];
   const bilibiliResult = await fillBilibiliDateRange(block, record, overwrite, used);
   if (bilibiliResult.handled) return bilibiliResult.filled;
+  const beisenResult = await fillBeisenPhoenixDateRange(block, record, overwrite, used);
+  if (beisenResult.handled) return beisenResult.filled;
   const periodResult = await fillAtsxPeriodMonthRange(block, record, overwrite, used);
   if (periodResult.handled) return periodResult.filled;
   const throneResult = await fillThroneDateRange(block, record, overwrite, used);
@@ -2542,8 +2881,11 @@ function normalizedEducationChoice(key, value) {
   }
   if (key === "type") {
     if (/海外|港澳台|留学/.test(source)) return "海外及港澳台";
-    if (/非全日制/.test(source)) return "统招非全日制";
-    if (/全日制/.test(source)) return "统招全日制";
+    if (/非全日制/.test(source)) return "全国普通高等院校非全日制";
+    // 智联/北森等「学习形式」常见选项文案
+    if (/全国普通高等院校全日制/.test(source)) return "全国普通高等院校全日制";
+    if (/全日制/.test(source)) return "全国普通高等院校全日制";
+    if (/统招全日制/.test(source)) return "全国普通高等院校全日制";
     if (/自考/.test(source)) return "自考";
   }
   if (key === "rank") {
@@ -2747,6 +3089,14 @@ function hasMappedValue(value) {
   return String(value).trim() !== "";
 }
 
+
+function normalizeBaseFieldValue(key, value) {
+  if (key === "educationType" || key === "type") {
+    return normalizedEducationChoice("type", value);
+  }
+  return value;
+}
+
 async function fillBaseFields(data, customFields, settings, handled, targets, aiResult) {
   const items = [];
   const candidates = new Map(availableCandidates(data, customFields, settings).map(candidate => [candidate.key, candidate]));
@@ -2765,6 +3115,36 @@ async function fillBaseFields(data, customFields, settings, handled, targets, ai
     "recruitmentSource", "relativesAtCompany", "drivingLicense", "avatarFile",
     "resumeAttachment", "skillsSummary", "languagesSummary", "summary"
   ]);
+
+  // Label-first pass for Beisen/zhiye: match visible titles like "邮箱" then fill the nearest control.
+  const priorityKeys = [
+    "email", "birthDate", "name", "phone", "gender", "currentCity", "educationLevel",
+    "school", "major", "graduationDate", "availableDate", "identityNumber", "identityType",
+    "emergencyContactName", "emergencyContactPhone", "emergencyContactRelation", "educationType"
+  ];
+  for (const key of priorityKeys) {
+    if (claimedSingleValueKeys.has(key)) continue;
+    const value = normalizeBaseFieldValue(key, mappedValue(key, data, customFields, settings));
+    if (!hasMappedValue(value)) continue;
+    const aliases = FIELD_DEFS[key];
+    if (!aliases) continue;
+    const control = findControlByAliases(document, aliases, handled, key);
+    if (!control || handled.has(control)) continue;
+    claimedSingleValueKeys.add(key);
+    handled.add(control);
+    const result = await fillControl(control, value, Boolean(settings.overwrite));
+    const label = aliases[0];
+    if (result === "filled") {
+      items.push({ label: `${label}：已填写（标签定位）`, state: "green", status: "已填写" });
+    } else if (result === "skipped") {
+      items.push({ label: `${label}：页面已有内容`, state: "gray", status: "跳过" });
+    } else if (result === "readonly") {
+      items.push({ label: `${label}：页面字段只读`, state: "gray", status: "跳过" });
+    } else {
+      items.push({ label: `${label}：标签已定位但写入失败`, state: "yellow", status: "未匹配" });
+    }
+  }
+
   for (let index = 0; index < targets.length; index += 1) {
     const element = targets[index];
     const ruleMatch = matchControl(element, customFields);
@@ -2785,7 +3165,7 @@ async function fillBaseFields(data, customFields, settings, handled, targets, ai
     if (singleValueKeys.has(match.key) && claimedSingleValueKeys.has(match.key)) continue;
     if (singleValueKeys.has(match.key)) claimedSingleValueKeys.add(match.key);
     handled.add(element);
-    const value = mappedValue(match.key, data, customFields, settings);
+    const value = normalizeBaseFieldValue(match.key, mappedValue(match.key, data, customFields, settings));
     if (!hasMappedValue(value)) {
       items.push({ label: `${match.label}：字段已识别，资料库暂无值`, state: "yellow", status: "资料缺失" });
       continue;
