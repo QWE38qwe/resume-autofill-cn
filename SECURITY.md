@@ -20,7 +20,7 @@ Security reports may cover:
 - Cross-origin or iframe handling problems.
 - Unsafe DOM interaction on recruitment websites.
 - Native Messaging host command or message validation problems.
-- Unintended exposure of mailbox authorization codes or Feishu application secrets.
+- Unintended exposure of mailbox authorization codes or AI provider secrets.
 
 The extension never needs users to share account passwords, mailbox authorization codes,
 API keys, application secrets, or authentication cookies with maintainers.

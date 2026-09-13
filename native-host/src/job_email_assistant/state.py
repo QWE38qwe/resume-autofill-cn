@@ -27,13 +27,47 @@ class StateStore:
                 message_id TEXT PRIMARY KEY,
                 imap_uid TEXT NOT NULL,
                 snapshot_json TEXT NOT NULL,
-                feishu_record_id TEXT,
                 updated_at TEXT NOT NULL
             )
             """
         )
+        self._migrate_legacy_mail_actions()
         self._remove_legacy_mail_bodies()
         self.connection.commit()
+
+    def _migrate_legacy_mail_actions(self) -> None:
+        columns = {
+            str(row[1])
+            for row in self.connection.execute("PRAGMA table_info(mail_actions)")
+        }
+        if "feishu_record_id" not in columns:
+            return
+        self.connection.execute("BEGIN")
+        try:
+            self.connection.execute("ALTER TABLE mail_actions RENAME TO mail_actions_legacy")
+            self.connection.execute(
+                """
+                CREATE TABLE mail_actions (
+                    message_id TEXT PRIMARY KEY,
+                    imap_uid TEXT NOT NULL,
+                    snapshot_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            self.connection.execute(
+                """
+                INSERT INTO mail_actions (message_id, imap_uid, snapshot_json, updated_at)
+                SELECT message_id, imap_uid, snapshot_json, updated_at
+                FROM mail_actions_legacy
+                """
+            )
+            self.connection.execute("DROP TABLE mail_actions_legacy")
+        except Exception:
+            self.connection.execute("ROLLBACK")
+            raise
+        else:
+            self.connection.execute("COMMIT")
 
     def _remove_legacy_mail_bodies(self) -> None:
         rows = self.connection.execute(
@@ -91,27 +125,21 @@ class StateStore:
         message_id: str,
         uid: str,
         snapshot_json: str,
-        feishu_record_id: str | None = None,
     ) -> None:
         self.connection.execute(
             """
             INSERT INTO mail_actions
-                (message_id, imap_uid, snapshot_json, feishu_record_id, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+                (message_id, imap_uid, snapshot_json, updated_at)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(message_id) DO UPDATE SET
                 imap_uid = excluded.imap_uid,
                 snapshot_json = excluded.snapshot_json,
-                feishu_record_id = COALESCE(
-                    excluded.feishu_record_id,
-                    mail_actions.feishu_record_id
-                ),
                 updated_at = excluded.updated_at
             """,
             (
                 message_id,
                 uid,
                 snapshot_json,
-                feishu_record_id,
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
@@ -120,7 +148,7 @@ class StateStore:
     def mail_action(self, message_id: str) -> dict[str, Any] | None:
         row = self.connection.execute(
             """
-            SELECT imap_uid, snapshot_json, feishu_record_id
+            SELECT imap_uid, snapshot_json
             FROM mail_actions
             WHERE message_id = ?
             """,
@@ -131,7 +159,6 @@ class StateStore:
         return {
             "uid": str(row[0]),
             "snapshot_json": str(row[1]),
-            "feishu_record_id": str(row[2]) if row[2] else None,
         }
 
     def clear_outcome(self, outcome: str) -> int:

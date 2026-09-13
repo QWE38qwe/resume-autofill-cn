@@ -99,10 +99,10 @@ const REPEAT_DEFS = [
   },
   {
     type: "work",
-    titles: ["实习经历", "实习/工作经历", "实习经验", "工作经历", "工作经验", "工作信息", "任职经历", "校外实习或工作经历", "校外实习", "校外工作经历", "work experience", "employment history", "experience"],
-    anchors: ["公司名称", "企业名称", "单位名称", "实习单位", "任职公司", "公司", "企业", "company", "employer", "organization"],
+    titles: ["实习经历", "实习/工作经历", "实习经验", "工作经历", "工作经验", "工作信息", "任职经历", "校外实习或工作经历", "校外实习", "校外工作经历", "work experience", "employment history", "experience", "实习/项目经历", "实习与工作经历", "工作/实习经历", "Internship", "Internships", "Work Experience"],
+    anchors: ["公司名称", "企业名称", "单位名称", "实习单位", "任职公司", "公司", "企业", "company", "employer", "organization", "实习公司", "Organization", "Organisation"],
     fields: {
-      company: ["公司名称", "企业名称", "单位名称", "实习单位", "任职公司", "公司", "企业", "company", "employer", "organization"],
+      company: ["公司名称", "企业名称", "单位名称", "实习单位", "任职公司", "公司", "企业", "company", "employer", "organization", "实习公司", "Organization", "Organisation"],
       department: ["所在部门", "部门名称", "任职部门", "实习部门", "部门", "department", "team"],
       position: ["职位名称", "岗位名称", "任职岗位", "担任岗位", "实习岗位", "担任职务", "职位", "岗位", "job title", "title", "position"],
       type: ["工作性质", "经历类型", "实习/全职", "employment type"],
@@ -606,6 +606,37 @@ function directText(element) {
     .trim();
 }
 
+function preferredFieldControl(candidates, key) {
+  const visible = candidates.filter(Boolean);
+  if (!visible.length) return null;
+  const isPlainText = control => control instanceof HTMLInputElement &&
+    control.type !== "hidden" &&
+    control.type !== "checkbox" &&
+    control.type !== "radio" &&
+    !control.readOnly &&
+    !selectWrapperFor(control);
+  if (key === "phone" || key === "identityNumber") {
+    return visible.find(isPlainText) || null;
+  }
+  if (key === "phoneCountryCode" || key === "identityType") {
+    return visible.find(control =>
+      control instanceof HTMLSelectElement ||
+      control.getAttribute?.("role") === "combobox" ||
+      Boolean(selectWrapperFor(control))
+    ) || null;
+  }
+  if (key === "birthDate") {
+    return visible.find(isDateControl) ||
+      visible.find(control => /出生|birth|日期|date/.test(normalizeText(
+        String(control.placeholder || "") + " " +
+        String(control.getAttribute?.("aria-label") || "") + " " +
+        String(control.className || "")
+      ))) ||
+      null;
+  }
+  return null;
+}
+
 function nearestControlsFromLabel(root, labelNode, key, used) {
   let node = labelNode;
   const wantsLongText = ["description", "content", "duty", "result"].includes(key);
@@ -618,6 +649,8 @@ function nearestControlsFromLabel(root, labelNode, key, used) {
       ...queryAllDeep(sibling, ".phoenix-select,.ant-select,.atsx-select").filter(isVisible)
     ].filter(control => !used.has(control));
     if (!local.length) continue;
+    const preferred = preferredFieldControl(local, key);
+    if (preferred) return preferred;
     if (wantsDate) {
       const date = local.find(isDateControl) || local.find(control => componentType(control) === "calendar");
       if (date) return date;
@@ -642,6 +675,8 @@ function nearestControlsFromLabel(root, labelNode, key, used) {
     // Dedupe
     const uniq = [...new Set(candidates)];
     if (!uniq.length || uniq.length > 6) continue;
+    const preferred = preferredFieldControl(uniq, key);
+    if (preferred) return preferred;
     if (wantsLongText) {
       const textarea = uniq.find(control => control instanceof HTMLTextAreaElement || control.isContentEditable);
       if (textarea) return textarea;
@@ -679,9 +714,12 @@ function findControlNearLabel(root, aliases, key, used) {
     if ((!text || text.length > 40) && compact && compact.length <= 16) text = (node.innerText || "").trim();
     if (!text || text.length > 80) return;
     const match = bestAlias(text, aliases) || bestAlias(compact, aliases);
-    if (!match || match.score < 82) return;
-    // Avoid section titles that merely include the alias.
-    if (compact.length > match.alias.replace(/\s+/g, "").length + 6 && match.score < 96) return;
+    if (!match || match.score < 75) return;
+    // Only reject weak substring hits inside long blobs/section titles.
+    // Keep startsWith/endsWith (88) and exact/token (96/100) for bilingual labels
+    // like "公司名称 Company" used by Moka/Shopee.
+    const aliasCompact = normalizeText(match.alias);
+    if (match.score < 88 && compact.length > aliasCompact.length + 8) return;
     const control = nearestControlsFromLabel(root, node, key, used);
     if (control && (!best || match.score > best.score)) best = { element: control, score: match.score, alias: match.alias };
   });
@@ -2781,13 +2819,22 @@ async function fillYearMonthControl(control, value, overwrite) {
 }
 
 async function fillYearMonthParts(block, record, overwrite, used) {
-  const parts = controls(block).filter(control => {
+  const marker = control => normalizeText([
+    control.getAttribute?.("placeholder"),
+    control.getAttribute?.("aria-label"),
+    control.getAttribute?.("title"),
+    control.querySelector?.(".ant-select-selection-placeholder,.atsx-select-selection__placeholder,[class*='placeholder'],[class*='Placeholder']")?.textContent
+  ].filter(Boolean).join(" "));
+  const parts = [...new Set([
+    ...controls(block),
+    ...customSelectControls(block)
+  ])].filter(control => {
     if (used.has(control)) return false;
-    const placeholder = normalizeText(control.getAttribute("placeholder"));
-    return placeholder === "年" || placeholder === "月";
+    const placeholder = marker(control);
+    return /^(?:请选择)?[年月]$/.test(placeholder) || /(^|\s)(年|月)(\s|$)/.test(placeholder);
   });
-  const years = parts.filter(control => normalizeText(control.getAttribute("placeholder")) === "年");
-  const months = parts.filter(control => normalizeText(control.getAttribute("placeholder")) === "月");
+  const years = parts.filter(control => /^(?:请选择)?年$/.test(marker(control)) || /(^|\s)年(\s|$)/.test(marker(control)));
+  const months = parts.filter(control => /^(?:请选择)?月$/.test(marker(control)) || /(^|\s)月(\s|$)/.test(marker(control)));
   if (years.length < 2 || months.length < 2) {
     return { filled: 0, failed: 0, handled: false };
   }

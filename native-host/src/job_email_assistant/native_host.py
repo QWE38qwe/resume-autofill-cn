@@ -11,14 +11,6 @@ from typing import Any, BinaryIO
 
 from . import __version__
 from .config import Settings
-from .feishu import FeishuBaseClient
-from .progress_monitor import (
-    list_enabled_channel_statuses,
-    record_visible_status,
-    run_monitor,
-    save_chrome_cookies,
-    start_login,
-)
 from .service import SyncService
 from .state import StateStore
 
@@ -87,18 +79,6 @@ def local_config() -> dict[str, Any]:
             "autoSync": True,
             "syncIntervalMinutes": sync_interval,
             "lookbackHours": int(values.get("MAIL_LOOKBACK_HOURS") or 24),
-            "appId": values.get("FEISHU_APP_ID") or "",
-            "appSecret": values.get("FEISHU_APP_SECRET") or "",
-            "baseToken": values.get("FEISHU_BASE_TOKEN") or "",
-            "tableId": values.get("FEISHU_TABLE_ID") or "",
-            "companyField": values.get("FEISHU_COMPANY_FIELD") or "公司",
-            "noteField": values.get("FEISHU_NOTE_FIELD") or "note",
-            "assessmentLinkField": values.get("FEISHU_ASSESSMENT_LINK_FIELD") or "测评链接",
-            "ddlField": values.get("FEISHU_DDL_FIELD") or "ddl",
-            "parentField": values.get("FEISHU_PARENT_FIELD") or "父记录",
-            "receivedAtField": values.get("FEISHU_RECEIVED_AT_FIELD") or "开始日期",
-            "subjectField": values.get("FEISHU_SUBJECT_FIELD") or "最新进展记录",
-            "cookieStatusField": values.get("FEISHU_COOKIE_STATUS_FIELD") or "Cookie状态",
         },
         "aiProvider": {
             "id": "local-env-default",
@@ -115,16 +95,10 @@ def local_config() -> dict[str, Any]:
 def handle(message: dict[str, Any]) -> dict[str, Any]:
     action = message.get("action")
     if action == "ping":
-        system = platform.system()
         return {
             "ok": True,
             "version": __version__,
-            "platform": system,
-            "keyProtection": (
-                "macOS Keychain" if system == "Darwin"
-                else "Windows DPAPI" if system == "Windows"
-                else "unsupported"
-            ),
+            "platform": platform.system(),
         }
     if action == "localConfig":
         return local_config()
@@ -135,58 +109,6 @@ def handle(message: dict[str, Any]) -> dict[str, Any]:
         finally:
             state.close()
         return {"ok": True, "cleared": count}
-    if action == "manualMailAction":
-        settings = Settings.from_payload(message, STATE_DB)
-        service = SyncService(settings)
-        try:
-            detail = service.manual_action(
-                str(message.get("messageId") or ""),
-                str(message.get("mailAction") or ""),
-                message.get("mailSnapshot")
-                if isinstance(message.get("mailSnapshot"), dict)
-                else None,
-            )
-        finally:
-            service.close()
-        return {"ok": True, "detail": detail}
-    if action == "trackProgress":
-        settings = Settings.from_payload(message, STATE_DB)
-        feishu = FeishuBaseClient(settings)
-        try:
-            return run_monitor(feishu, str(message.get("channelId") or "") or None)
-        finally:
-            feishu.close()
-    if action == "listProgressChannels":
-        settings = Settings.from_payload(message, STATE_DB)
-        feishu = FeishuBaseClient(settings)
-        try:
-            return list_enabled_channel_statuses(feishu)
-        finally:
-            feishu.close()
-    if action == "startProgressLogin":
-        return start_login(str(message.get("channelId") or ""))
-    if action == "saveProgressCookies":
-        cookies = message.get("cookies")
-        if not isinstance(cookies, list):
-            raise ValueError("无效的浏览器会话数据")
-        storage = message.get("storage")
-        return save_chrome_cookies(
-            str(message.get("channelId") or ""),
-            cookies,
-            storage if isinstance(storage, dict) else None,
-        )
-    if action == "recordVisibleProgress":
-        settings = Settings.from_payload(message, STATE_DB)
-        feishu = FeishuBaseClient(settings)
-        try:
-            return record_visible_status(
-                feishu,
-                str(message.get("channelId") or ""),
-                str(message.get("status") or ""),
-                str(message.get("detail") or ""),
-            )
-        finally:
-            feishu.close()
     if action != "sync":
         raise ValueError(f"Unsupported action: {action}")
 
@@ -215,7 +137,6 @@ def main() -> int:
             logging.exception("Native host request failed")
             response = {"ok": False, "error": str(error)[:500]}
         write_message(sys.stdout.buffer, response)
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

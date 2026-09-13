@@ -36,22 +36,6 @@ class Settings:
     llm_model: str
     llm_providers: tuple[LlmProvider, ...]
     llm_timeout_seconds: float
-    feishu_app_id: str
-    feishu_app_secret: str
-    feishu_base_token: str
-    feishu_table_id: str
-    feishu_company_field: str
-    feishu_note_field: str
-    feishu_position_field: str
-    feishu_progress_field: str
-    feishu_assessment_link_field: str
-    feishu_ddl_field: str
-    feishu_parent_field: str
-    feishu_received_at_field: str
-    feishu_subject_field: str
-    feishu_cookie_status_field: str
-    feishu_cookie_checked_at_field: str
-    feishu_monitor_enabled_field: str
     poll_interval_minutes: int
     state_db_path: Path
     log_level: str
@@ -84,34 +68,6 @@ class Settings:
             llm_model=primary_provider.model,
             llm_providers=(primary_provider,),
             llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "60")),
-            feishu_app_id=_required("FEISHU_APP_ID"),
-            feishu_app_secret=_required("FEISHU_APP_SECRET"),
-            feishu_base_token=_required("FEISHU_BASE_TOKEN"),
-            feishu_table_id=_required("FEISHU_TABLE_ID"),
-            feishu_company_field=os.getenv("FEISHU_COMPANY_FIELD", "公司"),
-            feishu_note_field=os.getenv("FEISHU_NOTE_FIELD", "note"),
-            feishu_position_field=os.getenv("FEISHU_POSITION_FIELD", "岗位"),
-            feishu_progress_field=os.getenv("FEISHU_PROGRESS_FIELD", "进展"),
-            feishu_assessment_link_field=os.getenv(
-                "FEISHU_ASSESSMENT_LINK_FIELD", "测评链接"
-            ),
-            feishu_ddl_field=os.getenv("FEISHU_DDL_FIELD", "ddl"),
-            feishu_parent_field=os.getenv("FEISHU_PARENT_FIELD", "父记录"),
-            feishu_received_at_field=os.getenv(
-                "FEISHU_RECEIVED_AT_FIELD", "开始日期"
-            ),
-            feishu_subject_field=os.getenv(
-                "FEISHU_SUBJECT_FIELD", "最新进展记录"
-            ),
-            feishu_cookie_status_field=os.getenv(
-                "FEISHU_COOKIE_STATUS_FIELD", "Cookie状态"
-            ),
-            feishu_cookie_checked_at_field=os.getenv(
-                "FEISHU_COOKIE_CHECKED_AT_FIELD", "Cookie最近检测"
-            ),
-            feishu_monitor_enabled_field=os.getenv(
-                "FEISHU_MONITOR_ENABLED_FIELD", "是否巡检"
-            ),
             poll_interval_minutes=int(os.getenv("POLL_INTERVAL_MINUTES", "720")),
             state_db_path=Path(os.getenv("STATE_DB_PATH", "./data/state.db")).expanduser(),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -121,8 +77,6 @@ class Settings:
     def from_payload(cls, payload: dict[str, Any], state_db_path: Path) -> "Settings":
         mail = payload.get("mail") or {}
         ai = payload.get("ai") or {}
-        feishu = payload.get("feishu") or {}
-
         def required(section: dict[str, Any], key: str, label: str) -> str:
             value = str(section.get(key) or "").strip()
             if not value:
@@ -162,34 +116,6 @@ class Settings:
             llm_model=primary_provider.model,
             llm_providers=tuple(providers),
             llm_timeout_seconds=float(ai.get("timeoutSeconds") or 60),
-            feishu_app_id=required(feishu, "appId", "飞书 App ID"),
-            feishu_app_secret=required(feishu, "appSecret", "飞书 App Secret"),
-            feishu_base_token=required(feishu, "baseToken", "飞书 Base Token"),
-            feishu_table_id=required(feishu, "tableId", "飞书 Table ID"),
-            feishu_company_field=str(feishu.get("companyField") or "公司"),
-            feishu_note_field=str(feishu.get("noteField") or "note"),
-            feishu_position_field=str(feishu.get("positionField") or "岗位"),
-            feishu_progress_field=str(feishu.get("progressField") or "进展"),
-            feishu_assessment_link_field=str(
-                feishu.get("assessmentLinkField") or "测评链接"
-            ),
-            feishu_ddl_field=str(feishu.get("ddlField") or "ddl"),
-            feishu_parent_field=str(feishu.get("parentField") or "父记录"),
-            feishu_received_at_field=str(
-                feishu.get("receivedAtField") or "开始日期"
-            ),
-            feishu_subject_field=str(
-                feishu.get("subjectField") or "最新进展记录"
-            ),
-            feishu_cookie_status_field=str(
-                feishu.get("cookieStatusField") or "Cookie状态"
-            ),
-            feishu_cookie_checked_at_field=str(
-                feishu.get("cookieCheckedAtField") or "Cookie最近检测"
-            ),
-            feishu_monitor_enabled_field=str(
-                feishu.get("monitorEnabledField") or "是否巡检"
-            ),
             poll_interval_minutes=max(30, int(payload.get("pollIntervalMinutes") or 720)),
             state_db_path=state_db_path,
             log_level="WARNING",

@@ -9,7 +9,6 @@ from pathlib import Path
 
 from .config import Settings
 from .extractors import extract_with_rules
-from .feishu import FeishuBaseClient
 from .mailbox import parse_message
 from .service import SyncService
 from .state import StateStore
@@ -18,11 +17,11 @@ from .state import StateStore
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="job-email-assistant",
-        description="Extract recruitment tasks from email and update Feishu Base.",
+        description="Extract recruitment tasks from email into local task history.",
     )
     parser.add_argument("--env-file", default=".env", help="Path to dotenv file")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("doctor", help="Validate configuration and Feishu fields")
+    subparsers.add_parser("doctor", help="Validate mail and AI configuration")
     subparsers.add_parser("sync", help="Fetch and process email once")
     subparsers.add_parser("watch", help="Run sync periodically")
     subparsers.add_parser(
@@ -41,12 +40,7 @@ def _configure_logging(level: str) -> None:
 
 
 def _doctor(settings: Settings) -> int:
-    client = FeishuBaseClient(settings)
-    try:
-        client.validate_fields()
-    finally:
-        client.close()
-    print("OK: configuration loaded and Feishu fields are accessible")
+    print("OK: mail and AI configuration loaded")
     return 0
 
 

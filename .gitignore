@@ -26,3 +26,13 @@ native-host/local-config.json
 native-host/.pytest_cache/
 native-host/**/__pycache__/
 native-host/src/*.egg-info/
+
+# Local QA/debug artifacts that may contain personal resume data.
+*.bak-before-*
+tests/_*
+tests/cdp*.txt
+tests/chrome_pdfjs_*.txt
+tests/dump_*.txt
+tests/grab_*.txt
+tests/sim_*.txt
+tests/fixtures/

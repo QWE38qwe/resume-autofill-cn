@@ -10,7 +10,6 @@
   <svg class="icon-sprite" aria-hidden="true">
     <symbol id="icon-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9"/><path d="M9 20v-7h6v7"/></symbol>
     <symbol id="icon-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></symbol>
-    <symbol id="icon-progress" viewBox="0 0 24 24"><path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-7"/><path d="M22 19H2"/></symbol>
     <symbol id="icon-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
     <symbol id="icon-school" viewBox="0 0 24 24"><path d="m2 10 10-5 10 5-10 5z"/><path d="M6 12v5c3 2 9 2 12 0v-5"/><path d="M22 10v6"/></symbol>
     <symbol id="icon-files" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4z"/><path d="M8 6h4M8 10h4M8 14h3"/><path d="M16 6h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2v-2"/></symbol>
@@ -29,7 +28,6 @@
       <nav id="nav" aria-label="主导航">
         <button data-tab="home" class="active" title="概览"><span class="nav-icon"><svg><use href="#icon-home"></use></svg></span><span class="nav-label">概览</span></button>
         <button data-tab="mail" title="邮件待办"><span class="nav-icon"><svg><use href="#icon-mail"></use></svg></span><span class="nav-label">邮件待办</span></button>
-        <button data-tab="progress" title="投递进展"><span class="nav-icon"><svg><use href="#icon-progress"></use></svg></span><span class="nav-label">投递进展</span></button>
         <button data-tab="profile" title="个人资料"><span class="nav-icon"><svg><use href="#icon-user"></use></svg></span><span class="nav-label">个人资料</span></button>
         <button data-tab="growth" title="教育背景"><span class="nav-icon"><svg><use href="#icon-school"></use></svg></span><span class="nav-label">教育背景</span></button>
         <button data-tab="versions" title="简历版本"><span class="nav-icon"><svg><use href="#icon-files"></use></svg></span><span class="nav-label">简历版本</span></button>
@@ -75,68 +73,46 @@
   <div class="surface mail-board-surface">
     <div class="surface-head">
       <div><span class="section-kicker" id="mailLookbackLabel">最近 24 小时</span><h2>读取记录</h2><p id="mailLastSync">尚未同步</p></div>
-      <button class="btn ghost" id="retryMailReview">重试待确认</button>
+      <div class="mail-view-actions">
+        <div class="mail-view-switch" role="group" aria-label="邮件待办视图">
+          <button type="button" class="active" data-mail-view="board">看板</button>
+          <button type="button" data-mail-view="calendar">日历</button>
+        </div>
+        <button class="btn ghost" id="retryMailReview">重新识别公司</button>
+      </div>
     </div>
     <div class="mail-metrics">
       <div><span>读取</span><strong id="mailFetchedMetric">0</strong></div>
-      <div><span>写入</span><strong id="mailUpdatedMetric">0</strong></div>
+      <div><span>待办</span><strong id="mailUpdatedMetric">0</strong></div>
       <div><span>忽略</span><strong id="mailIgnoredMetric">0</strong></div>
-      <div><span>跳过</span><strong id="mailSkippedMetric">0</strong></div>
-      <div><span>待确认</span><strong id="mailReviewMetric">0</strong></div>
+      <div><span>重复</span><strong id="mailSkippedMetric">0</strong></div>
+      <div><span>公司待修正</span><strong id="mailReviewMetric">0</strong></div>
     </div>
     <div class="mail-filters">
-      <select id="mailStatusFilter"><option value="__default__">默认（隐藏已忽略）</option><option value="">全部状态</option><option>已写入</option><option>已完成</option><option>已挂</option><option>待确认</option><option>已忽略</option><option>失败</option></select>
+      <select id="mailStatusFilter"><option value="__default__">默认（隐藏已忽略）</option><option value="">全部状态</option><option>待办</option><option>已完成</option><option>已挂</option><option>已忽略</option><option>失败</option></select>
       <select id="mailCategoryFilter"><option value="">全部分类</option><option>在线测评</option><option>ai面试</option><option>面试邀约</option></select>
       <select id="mailSort"><option value="received_desc">接收时间：最新优先</option><option value="received_asc">接收时间：最早优先</option><option value="deadline_asc">DDL：最早优先</option><option value="deadline_desc">DDL：最晚优先</option></select>
     </div>
-    <div id="mailHistoryTable"><div class="empty">同步后会显示读取过的邮件及处理结果</div></div>
-  </div>
-</section>
-<section id="progress" class="section">
-  <div class="mail-hero progress-hero">
-    <div>
-      <span class="section-kicker">APPLICATION PULSE</span>
-      <h1>投递进展</h1>
-      <p>仅读取已登录招聘网站的投递页，并同步登录态可用状态。</p>
+    <div id="mailBoardView">
+      <div id="mailHistoryTable"><div class="empty">同步后会显示读取过的邮件及处理结果</div></div>
     </div>
-    <div class="mail-hero-actions">
-      <span class="bridge-state" id="progressBridgeStatus"><i></i>等待巡检</span>
-      <label class="compact-toggle"><input type="checkbox" id="progressAutoSync" checked> 自动巡检</label>
-      <select id="progressIntervalHours" aria-label="投递进展巡检间隔"><option value="12">12 小时</option><option value="6">6 小时</option><option value="24">24 小时</option></select>
-      <button class="btn primary" id="runProgressMonitor">立即巡检</button>
-    </div>
-  </div>
-  <div class="surface progress-board-surface">
-    <div class="surface-head">
-      <div><span class="section-kicker">本机登录态</span><h2>渠道状态</h2><p id="progressLastRun">尚未巡检</p></div>
-      <span class="muted" id="progressUpdatedCount">本次更新 0 条飞书记录</span>
-    </div>
-    <div class="progress-legend">
-      <span class="progress-state live">生效中</span>
-      <span class="progress-state expired">已过期</span>
-      <span class="progress-state failed">读取失败</span>
-      <span class="progress-state unconfigured">未配置</span>
-      <span class="progress-state unsupported">暂不支持</span>
-      <span class="progress-tag manual" title="百度 / OPPO / 大疆需要在当前 Chrome 标签页完成登录或验证码，并进行可见核对">手动核对</span>
-    </div>
-    <div class="progress-filters">
-      <label class="progress-search"><span>⌕</span><input id="progressCompanyFilter" type="search" placeholder="搜索公司"></label>
-      <details id="progressStatusFilters" class="progress-status-menu">
-        <summary id="progressStatusFilterSummary">全部状态</summary>
-        <div class="progress-status-options" aria-label="按状态筛选">
-          <label><input type="checkbox" value="生效中"> 生效中</label>
-          <label><input type="checkbox" value="已过期"> 已过期</label>
-          <label><input type="checkbox" value="读取失败"> 读取失败</label>
-          <label><input type="checkbox" value="需在Chrome核对"> 需在Chrome核对</label>
-          <label><input type="checkbox" value="未配置"> 未配置</label>
-          <label><input type="checkbox" value="暂不支持"> 暂不支持</label>
+    <div id="mailCalendarView" class="mail-calendar-view hidden">
+      <div class="mail-calendar-main">
+        <div class="mail-calendar-toolbar">
+          <button class="icon-button" id="mailCalendarPrev" type="button" aria-label="上个月">‹</button>
+          <button class="btn ghost small" id="mailCalendarToday" type="button">今天</button>
+          <strong id="mailCalendarTitle"></strong>
+          <button class="icon-button" id="mailCalendarNext" type="button" aria-label="下个月">›</button>
         </div>
-      </details>
+        <div class="mail-calendar-weekdays" aria-hidden="true"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+        <div id="mailCalendarGrid" class="mail-calendar-grid"></div>
+      </div>
+      <aside class="mail-day-panel">
+        <div class="mail-day-head"><div><span class="section-kicker">当日日程</span><h3 id="mailSelectedDate"></h3></div><button class="btn ghost small" id="mailAgendaToggle" type="button">展开日程</button></div>
+        <div id="mailDayAgenda" class="mail-day-agenda"></div>
+        <label class="mail-day-note"><span>日期备注</span><textarea id="mailCalendarNote" rows="5" placeholder="记录当天安排、复盘或提醒"></textarea></label>
+      </aside>
     </div>
-    <div id="progressChannelList" class="progress-channel-list">
-      <div class="empty">点击“立即巡检”后显示招聘网站登录态状态。</div>
-    </div>
-    <p class="muted progress-login-note">两步接入：先点“① 登录”在当前浏览器完成密码自动填充、验证码或扫码，登录成功后点“② 连接并验证”，插件会自动保存登录态、验证可用并回写飞书。带“手动核对”标记的渠道（百度 / OPPO / 大疆）需保持已验证的 Chrome 标签页，并点“② 连接并验证”按需查看。</p>
   </div>
 </section>
 <section id="profile" class="section">
@@ -228,30 +204,6 @@
       <div class="field"><label for="mailHost">IMAP 地址</label><input id="mailHost" placeholder="imap.126.com"></div>
       <div class="field"><label for="mailPort">SSL 端口</label><input id="mailPort" type="number" min="1" max="65535" value="993"></div>
     </div>
-  </div>
-  <div class="surface settings-card">
-    <div class="surface-head">
-      <div><h2>目标多维表格</h2></div>
-    </div>
-    <div class="form-grid">
-      <div class="field"><label for="mailFeishuAppId">App ID</label><input id="mailFeishuAppId" autocomplete="off"></div>
-      <div class="field"><label for="mailFeishuSecret">App Secret</label><input id="mailFeishuSecret" type="text" autocomplete="off"></div>
-      <div class="field"><label for="mailBaseToken">Base Token</label><input id="mailBaseToken" autocomplete="off"></div>
-      <div class="field"><label for="mailTableId">Table ID</label><input id="mailTableId" value="tblhXjQP5FKvqWUm"></div>
-    </div>
-    <details class="advanced-fields">
-      <summary>字段映射</summary>
-      <div class="form-grid">
-        <div class="field"><label for="mailCompanyField">公司字段</label><input id="mailCompanyField" value="公司"></div>
-        <div class="field"><label for="mailNoteField">分类字段</label><input id="mailNoteField" value="note"></div>
-        <div class="field"><label for="mailLinkField">链接字段</label><input id="mailLinkField" value="测评链接"></div>
-        <div class="field"><label for="mailDdlField">截止时间字段</label><input id="mailDdlField" value="ddl"></div>
-        <div class="field"><label for="mailParentField">父记录字段</label><input id="mailParentField" value="父记录"></div>
-        <div class="field"><label for="mailReceivedAtField">邮件时间字段</label><input id="mailReceivedAtField" value="开始日期"></div>
-        <div class="field"><label for="mailSubjectField">邮件主题字段</label><input id="mailSubjectField" value="最新进展记录"></div>
-        <div class="field"><label for="mailCookieStatusField">Cookie 状态字段</label><input id="mailCookieStatusField" value="Cookie状态"></div>
-      </div>
-    </details>
   </div>
   <div class="surface settings-card">
     <div class="surface-head">

@@ -13,7 +13,7 @@ def test_windows_installer_registers_chrome_and_edge():
     assert "Microsoft\\Edge\\NativeMessagingHosts" in script
     assert 'allowed_origins = @("chrome-extension://$ExtensionId/")' in script
     assert "ConvertTo-Json" in script
-    assert "uv run playwright install chromium" in script
+    assert "playwright install" not in script
 
 
 def test_windows_uninstaller_preserves_data_by_default():

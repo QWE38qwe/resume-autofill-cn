@@ -33,10 +33,6 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "uv sync 执行失败"
     }
-    & uv run playwright install chromium
-    if ($LASTEXITCODE -ne 0) {
-        throw "Playwright Chromium 安装失败"
-    }
 }
 finally {
     Pop-Location
@@ -70,5 +66,4 @@ foreach ($RegistryPath in $RegistryTargets) {
 
 Write-Host "Native Host Windows 安装完成。"
 Write-Host "运行目录：$InstallRoot"
-Write-Host "密钥保护：当前 Windows 用户 DPAPI"
 Write-Host "请在扩展管理页重新加载简填，再到邮件待办测试连接。"

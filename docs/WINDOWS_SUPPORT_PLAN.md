@@ -12,7 +12,7 @@
 Native Messaging 本地桥接已提供 Windows 开发版适配：
 
 1. Chrome Web Store 扩展：提供全部纯浏览器能力。
-2. PowerShell 开发安装脚本：安装同一 Python 包，提供 IMAP 邮件同步和招聘站巡检。
+2. PowerShell 开发安装脚本：安装同一 Python 包，提供 IMAP 邮件同步。
 
 当前仍缺少面向普通用户的签名 EXE 安装器和 Windows 真机 E2E 证据。
 
@@ -39,11 +39,9 @@ Native Messaging 本地桥接已提供 Windows 开发版适配：
 
 迁移文件默认排除：
 
-- 招聘网站 Cookie / storage state
-- Native Host 加密密钥
 - 临时标签页、运行状态和 AI 映射缓存
 
-JSON 未加密，可能包含 API Key、邮箱授权码和飞书 App Secret，应只保存在可信设备。
+JSON 未加密，可能包含 API Key 和邮箱授权码，应只保存在可信设备。
 该方案能让用户在 macOS 导出、Windows 导入，且不需要云端同步或账号系统。
 
 ## Windows Native Host
@@ -54,9 +52,7 @@ JSON 未加密，可能包含 API Key、邮箱授权码和飞书 App Secret，�
 
 - 安装到 `%LOCALAPPDATA%\Jianfill\MailHost`。
 - 使用 uv 创建隔离环境和 `jianfill-mail-host.exe` 启动器。
-- 安装 Playwright Chromium。
 - 写入当前用户的 Chrome / Edge Native Messaging 注册表。
-- 使用当前 Windows 用户 DPAPI 保护 Fernet 登录态密钥。
 
 设置页可在 macOS / Windows 之间切换并复制对应命令。
 
@@ -72,7 +68,6 @@ JSON 未加密，可能包含 API Key、邮箱授权码和飞书 App Secret，�
   jianfill-mail-host.exe
   cn.local.jianfill.mail.json
   data\
-  tracker\state\auth\
 ```
 
 安装器需要：
@@ -84,16 +79,6 @@ JSON 未加密，可能包含 API Key、邮箱授权码和飞书 App Secret，�
 4. 写入 Edge 注册表：
    `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\cn.local.jianfill.mail`
 5. 提供卸载程序，删除注册表项；用户数据默认保留并询问是否删除。
-
-### 密钥与登录态
-
-`AuthStore` 已拆成平台后端：
-
-- macOS：Keychain
-- Windows：DPAPI
-
-Windows 已使用 DPAPI 保护随机 Fernet key，密文状态继续存放在用户本地目录。不要把 macOS
-Keychain 密钥复制到 Windows，也不要把招聘站 Cookie 放入普通资料备份。
 
 ### 签名
 
@@ -110,11 +95,10 @@ Keychain 密钥复制到 Windows，也不要把招聘站 Cookie 放入普通资�
 
 ### P1：Windows 本地桥接
 
-- [x] 抽象平台密钥存储
 - [x] 使用 `%LOCALAPPDATA%` 作为运行目录
 - [x] 增加 PowerShell 开发安装脚本
 - [x] 注册 Chrome / Edge Native Messaging
-- [ ] Windows 11 x64 真机 Ping、邮件同步和巡检 E2E
+- [ ] Windows 11 x64 真机 Ping 和邮件同步 E2E
 - 生成 PyInstaller 可执行程序和安装器
 
 ### P2：发布工程
@@ -132,6 +116,5 @@ Keychain 密钥复制到 Windows，也不要把招聘站 Cookie 放入普通资�
 | 旧 schema 导入 | 自动迁移或拒绝并给出版本说明 |
 | Windows Chrome 自动填表 | 目标测试页关键字段成功填写 |
 | Windows Native Host Ping | 扩展返回桥接版本 |
-| 邮件同步 | IMAP 读取并写入测试 Base |
-| 登录态巡检 | 支持渠道完成一次真实页面巡检 |
+| 邮件同步 | IMAP 读取并生成本地任务 |
 | 卸载 | 注册表清理，用户数据按选择保留或删除 |

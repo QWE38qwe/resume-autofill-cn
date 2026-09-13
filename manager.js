@@ -1,10 +1,6 @@
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 
-// 百度 / OPPO / 大疆需要在用户当前 Chrome 标签页核对。这里给它们在渠道列表
-// 打持久“手动核对”标记。
-const CHROME_ONLY_CHANNELS = new Set(["baidu", "oppo", "dji"]);
-
 function safe(value) {
   const node = document.createElement("div");
   node.textContent = value ?? "";
@@ -170,14 +166,16 @@ let db = {};
 let modalCtx = null;
 let openedVersionId = null;
 let parsedDraft = null;
-let progressCatalogPromise = null;
 let mailNoteTimer = null;
+let mailCalendarNoteTimer = null;
+let mailCalendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+let mailSelectedDateKey = localDateKey(new Date());
+let mailAgendaExpanded = false;
 
 function activateTab(tab) {
   $$("#nav button").forEach(button => button.classList.toggle("active", button.dataset.tab === tab));
   $$(".section").forEach(section => section.classList.toggle("active", section.id === tab));
   window.scrollTo({ top: 0, behavior: "smooth" });
-  if (tab === "progress") refreshProgressChannelCatalog().catch(() => {});
 }
 
 $$("#nav button").forEach(button => {
@@ -213,6 +211,13 @@ async function init() {
   }
   db.profiles = db.profiles || [];
   db.customFields = db.customFields || [];
+  db.mailHistory = db.mailHistory || [];
+  const repairedMail = repairKnownMailCompanies(db.mailHistory);
+  db.mailHistory = repairedMail.history;
+  db.mailCompanyAliases = db.mailCompanyAliases || {};
+  if (repairedMail.changed) await chrome.storage.local.set({ mailHistory: db.mailHistory });
+  db.mailCalendarNotes = db.mailCalendarNotes || {};
+  db.mailViewPreference = "board";
   Object.keys(schemas).forEach(type => {
     db[type] = db[type] || [];
   });
@@ -230,10 +235,9 @@ async function init() {
   await disableLegacyDataSync();
   if (localConfigResult?.ok && $("#localConfigStatus")) {
     $("#localConfigStatus").dataset.touched = "1";
-    $("#localConfigStatus").textContent = "已从本地 .env 导入邮件、飞书和模型配置。";
+    $("#localConfigStatus").textContent = "已从本地 .env 导入邮件和模型配置。";
   }
   renderMailDashboard();
-  renderProgressMonitor();
 
   $("#hobbiesText").value = db.hobbies || "";
   const settings = db.settings || {};
@@ -309,7 +313,6 @@ async function importLocalConfig({ force = false } = {}) {
     return {
       ok: true,
       mail: Boolean(result.mailSettings?.address),
-      feishu: Boolean(result.mailSettings?.appId && result.mailSettings?.appSecret),
       ai: Boolean(result.aiProvider?.apiKey)
     };
   } catch (error) {
@@ -1228,16 +1231,7 @@ function bindHistory() {
       }
     };
     input.onchange = async () => {
-      const company = input.value.trim();
-      if (!company) {
-        input.value = original;
-        return;
-      }
-      db.fillHistory[index].company = company;
-      db.fillHistory = dedupeLatestHistory(db.fillHistory);
-      await chrome.storage.local.set({ fillHistory: db.fillHistory });
-      renderHistoryFilters();
-      renderHistory();
+      if (!await saveHistoryCompany(index, input.value, { rerender: true })) input.value = original;
     };
   });
   $$("[data-note]").forEach(input => {
@@ -1386,20 +1380,7 @@ function mailSettingsDefaults() {
     folder: "INBOX",
     autoSync: true,
     syncIntervalMinutes: 720,
-    lookbackHours: 24,
-    tableId: "tblhXjQP5FKvqWUm",
-    companyField: "公司",
-    noteField: "note",
-    assessmentLinkField: "测评链接",
-    ddlField: "ddl",
-    parentField: "父记录",
-    receivedAtField: "开始日期",
-    subjectField: "最新进展记录",
-    cookieStatusField: "Cookie状态",
-    cookieCheckedAtField: "Cookie最近检测",
-    monitorEnabledField: "是否巡检",
-    progressAutoSync: true,
-    progressIntervalMinutes: 720
+    lookbackHours: 24
   };
 }
 
@@ -1441,9 +1422,7 @@ function migrationPackage(storage) {
     "dataSyncSettings",
     "dataSyncState",
     "mailSyncStatus",
-    "nativeHostPlatform",
-    "progressLoginTabs",
-    "progressMonitorStatus"
+    "nativeHostPlatform"
   ]);
   const data = Object.fromEntries(
     Object.entries(storage || {})
@@ -1572,20 +1551,6 @@ function renderMailSettings() {
   $("#mailAuthCode").value = settings.authCode || "";
   $("#mailHost").value = settings.host;
   $("#mailPort").value = settings.port;
-  $("#mailFeishuAppId").value = settings.appId || "";
-  $("#mailFeishuSecret").value = settings.appSecret || "";
-  $("#mailBaseToken").value = settings.baseToken || "";
-  $("#mailTableId").value = settings.tableId;
-  $("#mailCompanyField").value = settings.companyField;
-  $("#mailNoteField").value = settings.noteField;
-  $("#mailLinkField").value = settings.assessmentLinkField;
-  $("#mailDdlField").value = settings.ddlField;
-  $("#mailParentField").value = settings.parentField;
-  $("#mailReceivedAtField").value = settings.receivedAtField;
-  $("#mailSubjectField").value = settings.subjectField;
-  $("#mailCookieStatusField").value = settings.cookieStatusField;
-  $("#progressAutoSync").checked = settings.progressAutoSync !== false;
-  $("#progressIntervalHours").value = String(Number(settings.progressIntervalMinutes) / 60 || 12);
   $("#mailAutoSync").checked = Boolean(settings.autoSync);
   $("#mailSyncIntervalHours").value = Number(settings.syncIntervalMinutes) / 60;
   $("#mailLookbackHours").value = settings.lookbackHours;
@@ -1614,22 +1579,6 @@ function mailSettingsFromForm() {
     host: $("#mailHost").value.trim() || "imap.126.com",
     port: Number($("#mailPort").value) || 993,
     folder: "INBOX",
-    appId: $("#mailFeishuAppId").value.trim(),
-    appSecret: $("#mailFeishuSecret").value.trim(),
-    baseToken: $("#mailBaseToken").value.trim(),
-    tableId: $("#mailTableId").value.trim(),
-    companyField: $("#mailCompanyField").value.trim() || "公司",
-    noteField: $("#mailNoteField").value.trim() || "note",
-    assessmentLinkField: $("#mailLinkField").value.trim() || "测评链接",
-    ddlField: $("#mailDdlField").value.trim() || "ddl",
-    parentField: $("#mailParentField").value.trim() || "父记录",
-    receivedAtField: $("#mailReceivedAtField").value.trim() || "开始日期",
-    subjectField: $("#mailSubjectField").value.trim() || "最新进展记录",
-    cookieStatusField: $("#mailCookieStatusField").value.trim() || "Cookie状态",
-    cookieCheckedAtField: "Cookie最近检测",
-    monitorEnabledField: "是否巡检",
-    progressAutoSync: $("#progressAutoSync").checked,
-    progressIntervalMinutes: Math.max(30, Math.round(Number($("#progressIntervalHours").value || 12) * 60)),
     autoSync: $("#mailAutoSync").checked,
     syncIntervalMinutes: Math.round(syncIntervalHours * 60),
     lookbackHours
@@ -1655,87 +1604,9 @@ function updateBridgeState(state, text) {
   node.innerHTML = `<i></i>${safe(text)}`;
 }
 
-function progressStatusClass(status) {
-  return {
-    "生效中": "live",
-    "已过期": "expired",
-    "读取失败": "failed",
-    "需在Chrome核对": "unconfigured",
-    "待读取": "unconfigured",
-    "暂不支持": "unsupported",
-    "未配置": "unconfigured"
-  }[status] || "unconfigured";
-}
-
-function updateProgressBridge(state, text) {
-  const node = $("#progressBridgeStatus");
-  node.className = `bridge-state ${state}`;
-  node.innerHTML = `<i></i>${safe(text)}`;
-}
-
-async function refreshProgressChannelCatalog() {
-  if (progressCatalogPromise) return progressCatalogPromise;
-  progressCatalogPromise = chrome.runtime.sendMessage({ type: "PROGRESS_CHANNELS" })
-    .then(result => {
-      if (!result?.ok) throw new Error(result?.error || "读取巡检渠道失败");
-      db.progressMonitorStatus = result;
-      renderProgressMonitor();
-      return result;
-    })
-    .finally(() => {
-      progressCatalogPromise = null;
-    });
-  return progressCatalogPromise;
-}
-
-function renderProgressMonitor() {
-  const monitor = db.progressMonitorStatus || {};
-  $("#progressUpdatedCount").textContent = `本次更新 ${monitor.updated || 0} 条飞书记录`;
-  if (monitor.state === "running") {
-    $("#progressLastRun").textContent = "正在读取招聘网站投递页…";
-  } else if (monitor.state === "error") {
-    $("#progressLastRun").textContent = `巡检失败：${monitor.error || "未知错误"}`;
-  } else if (monitor.finishedAt) {
-    $("#progressLastRun").textContent = `最近巡检 ${formatMailTime(monitor.finishedAt)}`;
-  } else {
-    $("#progressLastRun").textContent = "尚未巡检";
-  }
-
-  const keyword = ($("#progressCompanyFilter")?.value || "").trim().toLocaleLowerCase();
-  const statuses = [...document.querySelectorAll("#progressStatusFilters input:checked")]
-    .map(input => input.value);
-  $("#progressStatusFilterSummary").textContent = statuses.length
-    ? `已选 ${statuses.length} 个状态`
-    : "全部状态";
-  const channels = (monitor.channels || []).filter(channel =>
-    (!keyword || `${channel.name} ${channel.company}`.toLocaleLowerCase().includes(keyword)) &&
-    (!statuses.length || statuses.includes(channel.status))
-  );
-  $("#progressChannelList").innerHTML = channels.length ? `
-    <div class="progress-table-wrap"><table class="progress-table">
-      <thead><tr><th>公司</th><th>状态</th><th>投递链接</th><th>最近检测</th><th>操作</th></tr></thead>
-      <tbody>${channels.map(channel => `
-        <tr>
-          <td><strong>${safe(channel.name)}${CHROME_ONLY_CHANNELS.has(channel.channel_id) ? '<span class="progress-tag manual" title="该站点需要在当前 Chrome 标签页完成登录或验证码，并进行可见核对">手动核对</span>' : ""}</strong><small>${safe(channel.detail || "")}</small></td>
-          <td><span class="progress-state ${progressStatusClass(channel.status)}">${safe(channel.status)}</span></td>
-          <td>${httpUrl(channel.applicationUrl) ? `<a class="mail-open" href="${safeAttr(httpUrl(channel.applicationUrl))}" target="_blank" rel="noopener">打开投递 ↗</a>` : '<span class="cell-empty">—</span>'}</td>
-          <td>${monitor.finishedAt ? safe(formatMailTime(monitor.finishedAt)) : '<span class="cell-empty">—</span>'}</td>
-          <td class="progress-actions">${channel.supported === false
-            ? '<span class="muted">等待适配</span>'
-            : `<button class="icon-button progress-check" title="仅巡检此公司" data-channel-id="${safeAttr(channel.channel_id)}" ${monitor.runningChannelId === channel.channel_id ? "disabled" : ""}>↻</button><button class="btn ghost progress-chrome-login" data-channel-id="${safeAttr(channel.channel_id)}">① 登录</button><button class="btn primary progress-save-verify" data-channel-id="${safeAttr(channel.channel_id)}">② 连接并验证</button>`}</td>
-        </tr>
-      `).join("")}</tbody>
-    </table></div>` : '<div class="empty">在飞书公司主记录中将“是否巡检”设为“是”，再点击“立即巡检”。</div>';
-  updateProgressBridge(
-    monitor.state === "success" ? "success" : monitor.state === "error" ? "error" : "idle",
-    monitor.state === "success" ? "本机巡检完成" : monitor.state === "error" ? "巡检失败" : "等待巡检"
-  );
-}
-
 function mailStatusClass(status) {
-  if (status === "已写入" || status === "将写入" || status === "已完成") return "matched";
+  if (status === "待办" || status === "已完成") return "matched";
   if (status === "已挂") return "hung";
-  if (status === "待确认") return "unmatched";
   if (status === "失败") return "danger";
   return "skipped";
 }
@@ -1750,6 +1621,153 @@ function formatMailTime(value) {
     minute: "2-digit",
     hour12: false
   }).format(date);
+}
+
+async function saveHistoryCompany(index, value, { rerender = false } = {}) {
+  const company = String(value || "").trim();
+  if (!company || !db.fillHistory[index]) return false;
+  db.fillHistory[index].company = company;
+  db.fillHistory = dedupeLatestHistory(db.fillHistory);
+  await chrome.storage.local.set({ fillHistory: db.fillHistory });
+  if (rerender) {
+    renderHistoryFilters();
+    renderHistory();
+  }
+  return true;
+}
+
+function repairKnownMailCompanies(history) {
+  let changed = false;
+  const next = (history || []).map(item => {
+    if (item.companyLocked) return item;
+    const haystack = `${item.company || ""} ${item.companyRaw || ""} ${item.subject || ""}`;
+    const repaired = /岚图|voyah/i.test(haystack) ? "岚图汽车" : /招商银行|cmbchina/i.test(haystack) ? "招商银行" : item.company;
+    if (repaired && repaired !== item.company) {
+      changed = true;
+      return { ...item, company: repaired, companySource: "migration", needsCompanyReview: false };
+    }
+    return item;
+  });
+  return { history: next, changed };
+}
+
+function parseMailDate(value) {
+  if (!value) return null;
+  const source = String(value).trim();
+  const match = source.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?$/);
+  const date = match
+    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4] || 0), Number(match[5] || 0))
+    : new Date(source);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function localDateKey(value) {
+  const date = value instanceof Date ? value : parseMailDate(value);
+  if (!date) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function localDateTimeValue(value) {
+  const date = parseMailDate(value);
+  if (!date) return "";
+  return `${localDateKey(date)}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function mailTaskDate(item) {
+  if (item.status === "已完成" && item.completedAt) return parseMailDate(item.completedAt);
+  return parseMailDate(item.deadline);
+}
+
+function mailTimingLabel(item) {
+  if (item.status !== "已完成" || !item.completedAt || !item.deadline) return "";
+  const completed = parseMailDate(item.completedAt);
+  const deadline = parseMailDate(item.deadline);
+  if (!completed || !deadline) return "";
+  const minutes = Math.round(Math.abs(completed - deadline) / 60000);
+  const amount = minutes >= 1440
+    ? `${Math.floor(minutes / 1440)} 天`
+    : minutes >= 60 ? `${Math.floor(minutes / 60)} 小时` : `${minutes} 分钟`;
+  return completed <= deadline ? `提前 ${amount}` : `逾期 ${amount}`;
+}
+
+function mailCalendarEvents() {
+  const categories = new Set(["在线测评", "ai面试", "面试邀约"]);
+  return filteredMailHistory()
+    .filter(item => categories.has(item.category) && mailTaskDate(item))
+    .map(item => ({ item, date: mailTaskDate(item) }))
+    .sort((left, right) => left.date - right.date);
+}
+
+function renderMailView() {
+  const view = db.mailViewPreference === "calendar" ? "calendar" : "board";
+  $("#mailBoardView").classList.toggle("hidden", view !== "board");
+  $("#mailCalendarView").classList.toggle("hidden", view !== "calendar");
+  $("#mailCalendarView").classList.toggle("agenda-collapsed", !mailAgendaExpanded);
+  $("#mailAgendaToggle").textContent = mailAgendaExpanded ? "收起日程" : "展开日程";
+  $$('[data-mail-view]').forEach(button => button.classList.toggle("active", button.dataset.mailView === view));
+  if (view === "calendar") renderMailCalendar();
+}
+
+function renderMailCalendar() {
+  const events = mailCalendarEvents();
+  const year = mailCalendarMonth.getFullYear();
+  const month = mailCalendarMonth.getMonth();
+  $("#mailCalendarTitle").textContent = `${year} 年 ${month + 1} 月`;
+  const first = new Date(year, month, 1);
+  const gridStart = new Date(year, month, 1 - ((first.getDay() + 6) % 7));
+  const todayKey = localDateKey(new Date());
+  const cells = [];
+  for (let index = 0; index < 42; index += 1) {
+    const date = new Date(gridStart);
+    date.setDate(gridStart.getDate() + index);
+    const key = localDateKey(date);
+    const dayEvents = events.filter(event => localDateKey(event.date) === key);
+    cells.push(`
+      <button type="button" class="mail-calendar-day${date.getMonth() !== month ? " is-outside" : ""}${key === todayKey ? " is-today" : ""}${key === mailSelectedDateKey ? " is-selected" : ""}" data-calendar-date="${key}">
+        <span class="mail-calendar-day-number">${date.getDate()}</span>
+        <span class="mail-calendar-events">
+          ${dayEvents.slice(0, 3).map(({ item, date: eventDate }) => `
+            <span class="mail-calendar-event ${item.category === "ai面试" ? "is-ai" : item.category === "面试邀约" ? "is-interview" : "is-assessment"}${item.status === "已完成" ? " is-completed" : ""}">
+              <b>${safe(item.company || "无法确定公司")}</b>
+              <time>${String(eventDate.getHours()).padStart(2, "0")}:${String(eventDate.getMinutes()).padStart(2, "0")}</time>
+            </span>
+          `).join("")}
+          ${dayEvents.length > 3 ? `<span class="mail-calendar-more">还有 ${dayEvents.length - 3} 项</span>` : ""}
+        </span>
+      </button>
+    `);
+  }
+  $("#mailCalendarGrid").innerHTML = cells.join("");
+  renderMailDayAgenda(events);
+}
+
+function renderMailDayAgenda(events = mailCalendarEvents()) {
+  const selected = parseMailDate(mailSelectedDateKey);
+  $("#mailSelectedDate").textContent = selected
+    ? new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(selected)
+    : mailSelectedDateKey;
+  const items = events.filter(event => localDateKey(event.date) === mailSelectedDateKey);
+  $("#mailDayAgenda").innerHTML = items.length ? items.map(({ item, date }) => {
+    const link = httpUrl(item.assessmentUrl);
+    const timing = mailTimingLabel(item);
+    return `
+      <article class="mail-agenda-item ${item.status === "已完成" ? "is-completed" : ""}">
+        <div class="mail-agenda-copy"><strong>${safe(item.company || "无法确定公司")}</strong><p title="${safeAttr(item.subject || "")}">${safe(item.subject || "无主题")}</p></div>
+        <div class="mail-agenda-time"><time>${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}</time><span>${safe(item.category || "待办")}</span></div>
+        <div class="mail-agenda-meta">
+          <span>${item.deadline ? `DDL ${safe(formatMailTime(item.deadline))}` : "无 DDL"}</span>
+          ${timing ? `<span class="mail-timing ${timing.startsWith("逾期") ? "late" : "early"}">${safe(timing)}</span>` : ""}
+        </div>
+        <div class="mail-agenda-actions">
+          ${link ? `<a class="mail-open" href="${safeAttr(link)}" target="_blank" rel="noopener">打开链接 ↗</a>` : ""}
+          ${item.status === "已完成"
+            ? `<input class="mail-completed-at" data-message-id="${safeAttr(item.messageId)}" type="datetime-local" value="${safeAttr(localDateTimeValue(item.completedAt))}" aria-label="修改完成时间">`
+            : `<button type="button" class="btn primary small mail-complete" data-message-id="${safeAttr(item.messageId)}">标记完成</button>`}
+        </div>
+      </article>
+    `;
+  }).join("") : '<div class="empty compact">当天没有邮件待办</div>';
+  $("#mailCalendarNote").value = db.mailCalendarNotes?.[mailSelectedDateKey] || "";
 }
 
 function filteredMailHistory() {
@@ -1778,12 +1796,12 @@ function renderMailDashboard() {
   const status = db.mailSyncStatus || {};
   const summary = status.summary || {};
   $("#mailFetchedMetric").textContent = summary.fetched || 0;
-  $("#mailUpdatedMetric").textContent = summary.updated || 0;
+  $("#mailUpdatedMetric").textContent = summary.newTasks || summary.updated || 0;
   $("#mailIgnoredMetric").textContent = summary.irrelevant || 0;
-  $("#mailSkippedMetric").textContent = summary.alreadyProcessed || 0;
-  $("#mailReviewMetric").textContent = summary.needsReview || 0;
+  $("#mailSkippedMetric").textContent = summary.duplicates || summary.alreadyProcessed || 0;
+  $("#mailReviewMetric").textContent = summary.needsCompanyReview || summary.needsReview || 0;
   if (status.state === "syncing") {
-    $("#mailLastSync").textContent = "正在读取邮箱并核对飞书…";
+    $("#mailLastSync").textContent = "正在读取邮箱并整理本地任务…";
   } else if (status.state === "error") {
     $("#mailLastSync").textContent = `同步失败：${status.error || "未知错误"}`;
   } else if (status.finishedAt) {
@@ -1795,29 +1813,33 @@ function renderMailDashboard() {
   const rows = filteredMailHistory();
   if (!rows.length) {
     $("#mailHistoryTable").innerHTML = '<div class="empty">没有符合筛选条件的邮件记录</div>';
+    renderMailView();
     return;
   }
   $("#mailHistoryTable").innerHTML = `
     <div class="mail-table-wrap">
       <table class="mail-table">
-        <thead><tr><th>状态</th><th>公司</th><th>邮件标题</th><th>分类</th><th>DDL</th><th>接收时间</th><th>自定义备注</th><th>操作</th></tr></thead>
+        <thead><tr><th>状态</th><th>公司</th><th>邮件标题</th><th>分类</th><th>DDL</th><th>接收时间</th><th>完成时间</th><th>自定义备注</th><th>操作</th></tr></thead>
         <tbody>
           ${rows.map(item => {
             const link = httpUrl(item.assessmentUrl);
             return `
               <tr>
                 <td><span class="field-chip ${mailStatusClass(item.status)}">${safe(item.status || "未知")}</span></td>
-                <td><div class="mail-company" title="${safeAttr(item.company || item.reason || "未识别公司")}">${safe(item.company || item.reason || "未识别公司")}</div></td>
+                <td><input class="mail-company-input" data-message-id="${safeAttr(item.messageId)}" value="${safeAttr(item.company || "")}" placeholder="${safeAttr(item.reason || "编辑公司")}" aria-label="公司名称"></td>
                 <td><div class="mail-subject" title="${safeAttr(item.subject || "")}">${safe(item.subject || "无主题")}</div></td>
                 <td>${item.category ? `<span class="mail-category">${safe(item.category)}</span>` : '<span class="cell-empty">—</span>'}</td>
                 <td>${item.deadline ? `<time>${safe(item.deadline)}</time>` : '<span class="cell-empty">—</span>'}</td>
                 <td><time>${safe(formatMailTime(item.receivedAt))}</time></td>
+                <td>${item.status === "已完成"
+                  ? `<input class="mail-completed-at" data-message-id="${safeAttr(item.messageId)}" type="datetime-local" value="${safeAttr(localDateTimeValue(item.completedAt))}" aria-label="修改完成时间">`
+                  : '<span class="cell-empty">—</span>'}</td>
                 <td><input class="mail-note" data-message-id="${safeAttr(item.messageId)}" value="${safeAttr(item.customNote || "")}" placeholder="添加备注" aria-label="自定义备注"></td>
                 <td><div class="mail-actions">
                   ${link
                     ? `<a class="mail-open" href="${safeAttr(link)}" target="_blank" rel="noopener">打开链接 ↗</a>`
                     : '<span class="mail-open is-disabled" aria-disabled="true">打开链接</span>'}
-                  <select class="mail-action" data-message-id="${safeAttr(item.messageId)}" aria-label="修改邮件状态"><option value="">修改状态</option><option value="completed">已完成</option><option value="hung">已挂</option><option value="ignored">已忽略</option><option value="confirm_write">确认写入</option></select>
+                  <select class="mail-action" data-message-id="${safeAttr(item.messageId)}" aria-label="修改邮件状态"><option value="">修改状态</option><option value="completed">已完成</option><option value="hung">已挂</option><option value="ignored">已忽略</option></select>
                 </div></td>
               </tr>
             `;
@@ -1826,6 +1848,7 @@ function renderMailDashboard() {
       </table>
     </div>
   `;
+  renderMailView();
 }
 
 async function refreshMailState() {
@@ -1905,142 +1928,58 @@ $("#syncMailNow").addEventListener("click", async () => {
     button.textContent = "立即同步";
   }
 });
-$("#runProgressMonitor").addEventListener("click", async () => {
-  const button = $("#runProgressMonitor");
-  button.disabled = true;
-  button.textContent = "巡检中…";
-  updateProgressBridge("loading", "正在读取");
-  try {
-    const mailSettings = await persistMailSettings(false);
-    if (!mailSettings.appId || !mailSettings.appSecret) {
-      throw new Error("请先保存飞书写入配置");
-    }
-    const result = await chrome.runtime.sendMessage({ type: "PROGRESS_MONITOR" });
-    if (!result?.ok) throw new Error(result?.error || "进展巡检失败");
-    db.progressMonitorStatus = result;
-    renderProgressMonitor();
-  } catch (error) {
-    db.progressMonitorStatus = {
-      state: "error",
-      error: error.message || "进展巡检失败"
-    };
-    renderProgressMonitor();
-    alert(error.message || "进展巡检失败");
-  } finally {
-    button.disabled = false;
-    button.textContent = "立即巡检";
-  }
-});
-
-$("#progressAutoSync").addEventListener("change", () => persistMailSettings(false).catch(error => alert(error.message)));
-$("#progressIntervalHours").addEventListener("change", () => persistMailSettings(false).catch(error => alert(error.message)));
-$("#progressCompanyFilter").addEventListener("input", renderProgressMonitor);
-$("#progressStatusFilters").addEventListener("change", renderProgressMonitor);
-$("#progressChannelList").addEventListener("click", async event => {
-  const checkButton = event.target.closest(".progress-check");
-  if (checkButton) {
-    checkButton.disabled = true;
-    try {
-      const result = await chrome.runtime.sendMessage({
-        type: "PROGRESS_MONITOR",
-        channelId: checkButton.dataset.channelId
-      });
-      if (!result?.ok) throw new Error(result?.error || "进展巡检失败");
-      db.progressMonitorStatus = result;
-      renderProgressMonitor();
-      toast(`已刷新，回写飞书 ${result.updated || 0} 条`, "success");
-    } catch (error) {
-      toast(error.message || "进展巡检失败", "error");
-    } finally {
-      checkButton.disabled = false;
-    }
-    return;
-  }
-  const chromeLoginButton = event.target.closest(".progress-chrome-login");
-  if (chromeLoginButton) {
-    chromeLoginButton.disabled = true;
-    try {
-      const allowed = await chrome.permissions.request({
-        origins: ["https://*/*", "http://*/*"]
-      });
-      if (!allowed) throw new Error("需要允许招聘网站访问权限，才能保存登录后的会话");
-      const result = await chrome.runtime.sendMessage({
-        type: "PROGRESS_CHROME_LOGIN",
-        channelId: chromeLoginButton.dataset.channelId
-      });
-      if (!result?.ok) throw new Error(result?.error || "无法打开登录页面");
-      toast("已打开招聘网站，请完成登录/验证码，然后点“② 连接并验证”。", "info");
-    } catch (error) {
-      toast(error.message || "无法打开登录页面", "error");
-    } finally {
-      chromeLoginButton.disabled = false;
-    }
-    return;
-  }
-  const saveVerifyButton = event.target.closest(".progress-save-verify");
-  if (saveVerifyButton) {
-    const original = saveVerifyButton.textContent;
-    saveVerifyButton.disabled = true;
-    saveVerifyButton.textContent = "连接中…";
-    try {
-      const result = await chrome.runtime.sendMessage({
-        type: "PROGRESS_SAVE_AND_VERIFY",
-        channelId: saveVerifyButton.dataset.channelId
-      });
-      if (!result?.ok) throw new Error(result?.error || "保存并验证登录态失败");
-      db.progressMonitorStatus = result;
-      renderProgressMonitor();
-      if (result.verified === false) {
-        // 会话已存上，但验证阶段被拦下（多为未开启巡检）。给出可操作的引导，而非报错。
-        if (result.needsMonitorToggle) {
-          toast(`已保存 ${result.name || ""} 登录态（${result.savedCookies || 0} 条会话）。请在飞书把该公司主记录「是否巡检」设为「是」，再点 ↻ 刷新。`, "info");
-        } else {
-          toast(`已保存登录态，但验证未通过：${result.verifyError || "请稍后重试"}`, "error");
-        }
-      } else {
-        const label = result.status ? `状态：${result.status}` : "已回写飞书";
-        if (result.chromeOnly) {
-          // 百度 / OPPO / 大疆从当前 Chrome 标签页读取，没有“保存会话”的概念。
-          toast(`已从当前 Chrome 标签页读取 ${result.name || ""} · ${label}`, "success");
-        } else {
-          toast(`已连接 ${result.name || ""}（${result.savedCookies || 0} 条会话）· ${label}`, "success");
-        }
-      }
-    } catch (error) {
-      toast(error.message || "保存并验证登录态失败", "error");
-    } finally {
-      saveVerifyButton.disabled = false;
-      saveVerifyButton.textContent = original;
-    }
-    return;
-  }
-  const button = event.target.closest(".progress-login");
-  if (!button) return;
-  button.disabled = true;
-  try {
-    const result = await chrome.runtime.sendMessage({
-      type: "PROGRESS_LOGIN",
-      channelId: button.dataset.channelId
-    });
-    if (!result?.ok) throw new Error(result?.error || "无法启动登录窗口");
-    toast(`已打开${result.name}登录窗口，请在 5 分钟内完成登录，窗口会自动保存登录态并关闭，随后点“立即巡检”。`, "info");
-  } catch (error) {
-    toast(error.message || "无法启动登录窗口", "error");
-  } finally {
-    button.disabled = false;
-  }
-});
-
 $("#retryMailReview").addEventListener("click", async () => {
   const result = await chrome.runtime.sendMessage({ type: "MAIL_RETRY_REVIEW" });
   if (!result?.ok) return alert(result?.error || "重置失败");
-  alert(`已解除 ${result.cleared || 0} 封待确认邮件的去重状态，请重新同步。`);
+    alert(`已标记 ${result.cleared || 0} 封邮件重新识别公司，请重新同步。`);
 });
 
 $("#goAiSettings")?.addEventListener("click", () => activateTab("api"));
 $("#mailStatusFilter").addEventListener("change", renderMailDashboard);
 $("#mailCategoryFilter").addEventListener("change", renderMailDashboard);
 $("#mailSort").addEventListener("change", renderMailDashboard);
+$$("[data-mail-view]").forEach(button => button.addEventListener("click", () => {
+  db.mailViewPreference = button.dataset.mailView === "calendar" ? "calendar" : "board";
+  renderMailView();
+}));
+$("#mailCalendarPrev").addEventListener("click", () => {
+  mailCalendarMonth = new Date(mailCalendarMonth.getFullYear(), mailCalendarMonth.getMonth() - 1, 1);
+  renderMailCalendar();
+});
+$("#mailCalendarNext").addEventListener("click", () => {
+  mailCalendarMonth = new Date(mailCalendarMonth.getFullYear(), mailCalendarMonth.getMonth() + 1, 1);
+  renderMailCalendar();
+});
+$("#mailCalendarToday").addEventListener("click", () => {
+  const today = new Date();
+  mailCalendarMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  mailSelectedDateKey = localDateKey(today);
+  renderMailCalendar();
+});
+$("#mailCalendarGrid").addEventListener("click", event => {
+  const day = event.target.closest("[data-calendar-date]");
+  if (!day) return;
+  mailSelectedDateKey = day.dataset.calendarDate;
+  mailAgendaExpanded = true;
+  const selected = parseMailDate(mailSelectedDateKey);
+  if (selected) mailCalendarMonth = new Date(selected.getFullYear(), selected.getMonth(), 1);
+  renderMailView();
+});
+$("#mailAgendaToggle").addEventListener("click", () => {
+  mailAgendaExpanded = !mailAgendaExpanded;
+  renderMailView();
+});
+$("#mailCalendarNote").addEventListener("input", event => {
+  clearTimeout(mailCalendarNoteTimer);
+  const value = event.target.value;
+  const dateKey = mailSelectedDateKey;
+  mailCalendarNoteTimer = setTimeout(async () => {
+    db.mailCalendarNotes = { ...(db.mailCalendarNotes || {}) };
+    if (value.trim()) db.mailCalendarNotes[dateKey] = value.trim();
+    else delete db.mailCalendarNotes[dateKey];
+    await chrome.storage.local.set({ mailCalendarNotes: db.mailCalendarNotes });
+  }, 350);
+});
 $("#mailHistoryTable").addEventListener("input", event => {
   const input = event.target.closest(".mail-note");
   if (!input) return;
@@ -2054,40 +1993,78 @@ $("#mailHistoryTable").addEventListener("input", event => {
     await chrome.storage.local.set({ mailHistory: db.mailHistory });
   }, 350);
 });
+async function runMailAction(messageId, action) {
+  const statusMap = { completed: "已完成", hung: "已挂", ignored: "已忽略" };
+  const status = statusMap[action];
+  if (!status) return;
+  const existing = (db.mailHistory || []).find(item => item.messageId === messageId);
+  const completedAt = action === "completed"
+    ? (existing?.completedAt || new Date().toISOString())
+    : (status === "已完成" ? existing?.completedAt || null : null);
+  db.mailHistory = (db.mailHistory || []).map(item => item.messageId === messageId
+    ? { ...item, status, completedAt }
+    : item);
+  await chrome.storage.local.set({ mailHistory: db.mailHistory });
+  renderMailDashboard();
+  toast(`已标记为${status}`, "success");
+}
+
+$("#mailHistoryTable").addEventListener("change", async event => {
+  const input = event.target.closest(".mail-company-input");
+  if (!input) return;
+  const value = input.value.trim();
+  const messageId = input.dataset.messageId;
+  db.mailHistory = (db.mailHistory || []).map(item => item.messageId === messageId
+    ? { ...item, company: value || null, companyLocked: Boolean(value), companySource: value ? "manual" : "", needsCompanyReview: !value }
+    : item);
+  const current = db.mailHistory.find(item => item.messageId === messageId);
+  db.mailCompanyAliases = { ...(db.mailCompanyAliases || {}) };
+  if (value && current?.companyRaw) db.mailCompanyAliases[String(current.companyRaw).trim()] = value;
+  await chrome.storage.local.set({ mailHistory: db.mailHistory, mailCompanyAliases: db.mailCompanyAliases });
+  renderMailDashboard();
+  toast(value ? "公司名称已修正并记忆" : "已清除公司名称", "success");
+});
+$("#mailHistoryTable").addEventListener("keydown", event => {
+  const input = event.target.closest(".mail-company-input");
+  if (input && event.key === "Enter") {
+    event.preventDefault();
+    input.blur();
+  }
+});
 $("#mailHistoryTable").addEventListener("change", async event => {
   const select = event.target.closest(".mail-action");
   if (!select?.value) return;
-  if (select.value === "hung") {
-    db.mailHistory = (db.mailHistory || []).map(item =>
-      item.messageId === select.dataset.messageId ? { ...item, status: "已挂" } : item
-    );
-    await chrome.storage.local.set({ mailHistory: db.mailHistory });
-    renderMailDashboard();
-    toast("已标记为已挂", "success");
-    return;
-  }
   select.disabled = true;
   try {
-    const result = await chrome.runtime.sendMessage({
-      type: "MAIL_MANUAL_ACTION",
-      messageId: select.dataset.messageId,
-    mailAction: select.value,
-    mailSnapshot: (db.mailHistory || []).find(
-      item => item.messageId === select.dataset.messageId
-    )
-    });
-    if (!result?.ok) throw new Error(result?.error || "邮件操作失败");
-    db.mailHistory = (db.mailHistory || []).map(item =>
-      item.messageId === result.detail.messageId ? { ...item, ...result.detail } : item
-    );
-    await chrome.storage.local.set({ mailHistory: db.mailHistory });
-    renderMailDashboard();
+    await runMailAction(select.dataset.messageId, select.value);
   } catch (error) {
     select.value = "";
     alert(error.message || "邮件操作失败");
   } finally {
     select.disabled = false;
   }
+});
+$("#mailCalendarView").addEventListener("click", async event => {
+  const button = event.target.closest(".mail-complete");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    await runMailAction(button.dataset.messageId, "completed");
+  } catch (error) {
+    alert(error.message || "邮件操作失败");
+  } finally {
+    button.disabled = false;
+  }
+});
+document.addEventListener("change", async event => {
+  const input = event.target.closest(".mail-completed-at");
+  if (!input) return;
+  const completedAt = input.value ? new Date(input.value).toISOString() : null;
+  db.mailHistory = (db.mailHistory || []).map(item =>
+    item.messageId === input.dataset.messageId ? { ...item, completedAt } : item
+  );
+  await chrome.storage.local.set({ mailHistory: db.mailHistory });
+  renderMailDashboard();
 });
 $$("[data-native-platform]").forEach(button => {
   button.addEventListener("click", async () => {
@@ -2127,14 +2104,10 @@ $("#importLocalConfig").addEventListener("click", async () => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (
     area !== "local" ||
-    (!changes.mailHistory && !changes.mailSyncStatus && !changes.progressMonitorStatus)
+    (!changes.mailHistory && !changes.mailSyncStatus)
   ) return;
   if (changes.mailHistory) db.mailHistory = changes.mailHistory.newValue || [];
   if (changes.mailSyncStatus) db.mailSyncStatus = changes.mailSyncStatus.newValue || {};
-  if (changes.progressMonitorStatus) {
-    db.progressMonitorStatus = changes.progressMonitorStatus.newValue || {};
-    renderProgressMonitor();
-  }
   renderMailDashboard();
 });
 
@@ -2918,6 +2891,7 @@ async function createVersionFromParsed() {
   const previousPersonal = { ...(db.personal || {}) };
   const previousEducation = [...(db.education || [])];
   // Resume-version parse is internship-only: never overwrite personal/education here.
+  db.profiles.push(profile);
   db.activeProfileId = profile.id;
   try {
     await chrome.storage.local.set({

@@ -25,6 +25,8 @@ class Extraction:
     confidence: int = 0
     needs_review: bool = False
     evidence: list[str] = field(default_factory=list)
+    company_source: str | None = None
+    company_confidence: int = 0
 
     def merge_missing(self, other: "Extraction") -> "Extraction":
         for name in (
@@ -40,4 +42,7 @@ class Extraction:
         self.confidence = max(self.confidence, other.confidence)
         self.needs_review = self.needs_review or other.needs_review
         self.evidence.extend(item for item in other.evidence if item not in self.evidence)
+        if self.company_source is None:
+            self.company_source = other.company_source
+        self.company_confidence = max(self.company_confidence, other.company_confidence)
         return self

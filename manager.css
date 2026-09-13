@@ -788,9 +788,6 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .mail-hero-actions { position: relative; z-index: 1; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .mail-hero .btn.secondary { border-color: rgba(255, 255, 255, .2); background: rgba(255, 255, 255, .08); color: #fff; }
 .mail-hero .btn.primary { background: #75cbb0; color: #15312f; box-shadow: none; }
-.progress-hero { background: linear-gradient(135deg, #1b2e38, #24515a); }
-.progress-hero .section-kicker { color: #8ed3df; }
-
 .bridge-state {
   display: inline-flex;
   align-items: center;
@@ -817,6 +814,10 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 
 .mail-layout .settings-card { max-width: none; }
 .mail-board-surface { min-width: 0; }
+.mail-view-actions { display: flex; align-items: center; gap: 9px; }
+.mail-view-switch { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: #edf2ee; }
+.mail-view-switch button { min-width: 54px; min-height: 29px; border: 0; border-radius: 6px; color: var(--caption); background: transparent; cursor: pointer; font-size: 11px; font-weight: 700; }
+.mail-view-switch button.active { color: #fff; background: var(--accent); }
 .advanced-fields { margin-top: 18px; border-top: 1px solid var(--line); }
 .advanced-fields summary { padding: 14px 0 0; color: var(--caption); cursor: pointer; font-size: 12px; }
 .advanced-fields .form-grid { margin-top: 14px; }
@@ -888,8 +889,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .mail-table th:nth-child(4) { width: 80px; }
 .mail-table th:nth-child(5) { width: 116px; }
 .mail-table th:nth-child(6) { width: 94px; }
-.mail-table th:nth-child(7) { width: 170px; }
-.mail-table th:nth-child(8) { width: 216px; }
+.mail-table th:nth-child(7) { width: 158px; }
+.mail-table th:nth-child(8) { width: 170px; }
+.mail-table th:nth-child(9) { width: 216px; }
 .mail-table th:last-child, .mail-table td:last-child {
   position: sticky;
   right: 0;
@@ -903,6 +905,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .mail-table tr:hover td { background: #fbfcf8; }
 .mail-company, .mail-subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail-company { color: var(--ink); font-weight: 700; }
+.mail-company-input { width: 100%; min-width: 110px; border: 1px solid transparent; background: transparent; color: var(--ink); font: inherit; font-weight: 700; padding: 6px 4px; border-radius: 6px; }
+.mail-company-input:focus { border-color: var(--line-strong); background: #fff; outline: none; }
 .mail-subject { color: var(--ink); font-weight: 650; }
 .mail-note {
   width: 100%;
@@ -914,6 +918,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   font-size: 11px;
 }
 .mail-note:hover, .mail-note:focus { border-color: var(--line-strong); background: #fff; }
+.mail-completed-at { width: 100%; min-width: 142px; height: 32px; padding: 0 7px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink-soft); font-size: 10px; }
 .mail-table small { display: block; margin-top: 3px; overflow: hidden; color: var(--caption); text-overflow: ellipsis; white-space: nowrap; }
 .mail-category { color: var(--accent); font-weight: 700; }
 .mail-open { display: block; margin-top: 3px; color: var(--caption); font-size: 10px; text-decoration: none; }
@@ -944,57 +949,52 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .field-chip.danger { background: #f9e8e6; color: var(--danger); }
 .field-chip.hung { background: #eee9f8; color: #68549b; }
 
-.progress-board-surface { max-width: 980px; }
-.progress-legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 15px; }
-.progress-state {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 0 9px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-}
-.progress-state.live { background: #e4f3ea; color: var(--success); }
-.progress-state.expired { background: #fff1dd; color: var(--warning); }
-.progress-state.failed { background: #f9e8e6; color: var(--danger); }
-.progress-state.unsupported { background: #ecefeb; color: var(--caption); }
-.progress-state.unconfigured { background: #edf0ed; color: var(--caption); }
-.progress-tag {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 6px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 700;
-  vertical-align: middle;
-}
-.progress-tag.manual { background: #eae6f7; color: #5b4bb0; cursor: help; }
-.progress-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
-.progress-filters { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
-.progress-search { display: flex; align-items: center; gap: 7px; min-width: 210px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--caption); }
-.progress-search input { width: 100%; min-height: 32px; border: 0; outline: 0; background: transparent; font: inherit; }
-.progress-status-menu { position: relative; min-width: 148px; }
-.progress-status-menu summary { display: flex; align-items: center; justify-content: space-between; min-height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: #fff; cursor: pointer; font-size: 12px; list-style: none; }
-.progress-status-menu summary::-webkit-details-marker { display: none; }
-.progress-status-menu summary::after { content: "⌄"; color: var(--caption); font-size: 15px; }
-.progress-status-menu[open] summary { border-color: var(--accent); }
-.progress-status-options { position: absolute; z-index: 8; right: 0; top: calc(100% + 5px); width: 178px; padding: 6px; border: 1px solid var(--line); border-radius: 7px; background: #fff; box-shadow: 0 10px 24px rgba(18, 44, 41, .14); }
-.progress-status-options label { display: flex; align-items: center; gap: 7px; min-height: 31px; padding: 0 7px; border-radius: 4px; color: var(--ink); font-size: 12px; cursor: pointer; }
-.progress-status-options label:hover { background: #eef5f0; }
-.progress-status-options input { accent-color: var(--accent); }
-.progress-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.progress-table th { padding: 10px 12px; color: var(--caption); font-size: 10px; text-align: left; background: #edf3ef; }
-.progress-table td { padding: 12px; border-top: 1px solid var(--line); vertical-align: middle; }
-.progress-table td strong, .progress-table td small { display: block; }
-.progress-table td small { max-width: 210px; margin-top: 4px; overflow: hidden; color: var(--caption); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.progress-actions { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
 .icon-button { width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 6px; color: var(--accent); background: transparent; cursor: pointer; font-size: 17px; line-height: 1; }
 .icon-button:hover { background: #e8f4ee; }
-.progress-login { margin-top: 10px; padding: 5px 9px; font-size: 11px; }
-.progress-login-note { margin: 14px 0 0; font-size: 11px; }
-.progress-save-verify { padding: 5px 12px; font-size: 12px; }
+
+.mail-calendar-view { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+.mail-calendar-view.agenda-collapsed { grid-template-columns: minmax(0, 1fr); }
+.mail-calendar-view.agenda-collapsed .mail-day-panel { display: none; }
+.mail-calendar-toolbar { display: grid; grid-template-columns: 32px 54px 1fr 32px; align-items: center; gap: 7px; margin-bottom: 10px; }
+.mail-calendar-toolbar strong { text-align: center; font: 700 17px/1.2 "Songti SC", serif; }
+.mail-calendar-weekdays, .mail-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.mail-calendar-weekdays { border: 1px solid var(--line); border-bottom: 0; border-radius: 10px 10px 0 0; background: #edf3ef; }
+.mail-calendar-weekdays span { padding: 8px; color: var(--caption); font-size: 10px; font-weight: 700; text-align: center; }
+.mail-calendar-grid { overflow: hidden; border-top: 1px solid var(--line); border-left: 1px solid var(--line); border-radius: 0 0 10px 10px; }
+.mail-calendar-day { min-width: 0; min-height: 112px; padding: 7px; overflow: hidden; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; text-align: left; }
+.mail-calendar-day:hover, .mail-calendar-day.is-selected { background: #f1f7f3; }
+.mail-calendar-day.is-selected { box-shadow: inset 0 0 0 2px var(--accent); }
+.mail-calendar-day.is-outside { background: #f7f8f5; color: #a0aaa5; }
+.mail-calendar-day-number { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; font-size: 11px; font-weight: 700; }
+.mail-calendar-day.is-today .mail-calendar-day-number { background: var(--accent); color: #fff; }
+.mail-calendar-events { display: grid; gap: 4px; margin-top: 4px; }
+.mail-calendar-event { display: grid; grid-template-columns: minmax(0, 1fr) 34px; gap: 3px; align-items: center; padding: 3px 5px; border-left: 3px solid #2c9b7f; border-radius: 4px; background: #e7f4ee; color: #275148; font-size: 9px; }
+.mail-calendar-event.is-ai { border-color: #6876bc; background: #eeeff9; color: #444f8d; }
+.mail-calendar-event.is-interview { border-color: #ca8b35; background: #fff4df; color: #825d27; }
+.mail-calendar-event.is-completed { opacity: .66; }
+.mail-calendar-event time { font-variant-numeric: tabular-nums; }
+.mail-calendar-event b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-calendar-more { color: var(--caption); font-size: 9px; text-align: center; }
+.mail-day-panel { position: sticky; top: 22px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #fafbf7; }
+.mail-day-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.mail-day-head h3 { margin: 2px 0 13px; font-size: 17px; }
+.mail-day-agenda { display: grid; gap: 9px; max-height: 520px; overflow: auto; }
+.mail-agenda-item { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+.mail-agenda-item.is-completed { border-color: #c8ddd3; background: #f7fbf8; }
+.mail-agenda-time time, .mail-agenda-time span { display: block; }
+.mail-agenda-time time { color: var(--ink); font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.mail-agenda-time span { margin-top: 3px; color: var(--accent); font-size: 9px; }
+.mail-agenda-copy strong { display: block; font-size: 12px; }
+.mail-agenda-copy p { margin: 3px 0 0; overflow: hidden; color: var(--caption); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.mail-agenda-meta, .mail-agenda-actions { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 7px; }
+.mail-agenda-meta { color: var(--caption); font-size: 9px; }
+.mail-agenda-actions .mail-completed-at { flex: 1; }
+.mail-timing { padding: 2px 6px; border-radius: 999px; font-weight: 700; }
+.mail-timing.early { background: #e4f3ea; color: var(--success); }
+.mail-timing.late { background: #f9e8e6; color: var(--danger); }
+.mail-day-note { display: grid; gap: 6px; margin-top: 14px; color: var(--caption); font-size: 10px; font-weight: 700; }
+.mail-day-note textarea { width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 8px; background: #fff; font: inherit; font-size: 11px; line-height: 1.5; }
+.empty.compact { padding: 20px 8px; }
 
 /* 轻量 toast：右下角浮层，替代串联 alert */
 .toast-host {
@@ -1053,11 +1053,6 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   .mail-board-surface { position: static; }
   .mail-table-wrap { max-height: 620px; }
 }
-@media (max-width: 720px) {
-  .progress-filters { align-items: stretch; flex-direction: column; }
-  .progress-search { min-width: 0; }
-}
-
 @media (max-width: 820px) {
   .app-shell, .app-shell.sidebar-collapsed { display: block; }
   .sidebar { position: static; height: auto; padding: 13px 16px; border-right: 0; border-bottom: 1px solid var(--line); }
@@ -1085,6 +1080,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   .history-table th, .history-table td { padding-inline: 6px; }
   .history-detail { grid-template-columns: 1fr; }
   .mail-hero { align-items: flex-start; flex-direction: column; }
+  .mail-calendar-view { grid-template-columns: 1fr; }
+  .mail-day-panel { position: static; }
+  .mail-calendar-day { min-height: 90px; }
 }
 
 @media (max-width: 560px) {

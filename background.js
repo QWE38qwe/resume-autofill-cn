@@ -1,13 +1,8 @@
 const defaultAiRules = [];
 const MAIL_NATIVE_HOST = "cn.local.jianfill.mail";
 const MAIL_ALARM = "jianfill-mail-sync";
-const PROGRESS_ALARM = "jianfill-progress-monitor";
 const DATA_SYNC_ALARM = "jianfill-data-sync";
 const NATIVE_MESSAGE_TIMEOUT_MS = 5 * 60 * 1000;
-// 百度受反爬拦截，OPPO 的登录 token 不可导出，大疆则要求每次通过手机号验证码
-// 查询。这些渠道改为读取用户当前 Chrome 标签页判定状态。
-const CHROME_ONLY_CHANNELS = new Set(["baidu", "oppo", "dji"]);
-
 chrome.runtime.onInstalled.addListener(async () => {
   const current = await chrome.storage.local.get(null);
   const payload = { seedVersion: 6 };
@@ -22,6 +17,8 @@ chrome.runtime.onInstalled.addListener(async () => {
   });
   if (current.activeProfileId == null) payload.activeProfileId = "";
   if (current.hobbies == null) payload.hobbies = "";
+  if (!current.mailCalendarNotes || typeof current.mailCalendarNotes !== "object") payload.mailCalendarNotes = {};
+  payload.mailViewPreference = "board";
 
   const settings = {
     high: .9,
@@ -45,28 +42,22 @@ chrome.runtime.onInstalled.addListener(async () => {
         ? 720
         : Number(currentMailSettings.syncIntervalMinutes) || 720,
     lookbackHours: Number(currentMailSettings.lookbackHours) || 24,
-    tableId: "tblhXjQP5FKvqWUm",
-    companyField: "公司",
-    noteField: "note",
-    assessmentLinkField: "测评链接",
-    ddlField: "ddl",
-    parentField: "父记录",
-    receivedAtField: "开始日期",
-    subjectField: "最新进展记录",
-    cookieStatusField: "Cookie状态",
-    cookieCheckedAtField: "Cookie最近检测",
-    monitorEnabledField: "是否巡检",
-    progressAutoSync: true,
-    progressIntervalMinutes: 720,
     ...currentMailSettings
   };
   delete payload.mailSettings.dryRun;
+  delete payload.mailSettings.cookieStatusField;
+  delete payload.mailSettings.cookieCheckedAtField;
+  delete payload.mailSettings.monitorEnabledField;
+  delete payload.mailSettings.progressAutoSync;
+  delete payload.mailSettings.progressIntervalMinutes;
+  ["appId", "appSecret", "baseToken", "tableId", "companyField", "noteField", "assessmentLinkField", "ddlField", "parentField", "receivedAtField", "subjectField"].forEach(key => delete payload.mailSettings[key]);
   if (Number(currentMailSettings.syncIntervalMinutes) === 120) {
     payload.mailSettings.syncIntervalMinutes = 720;
   }
   await chrome.storage.local.set(payload);
+  await chrome.storage.local.remove("mailViewPreference");
+  await chrome.storage.local.remove(["progressLoginTabs", "progressMonitorStatus"]);
   await scheduleMailSync(payload.mailSettings);
-  await scheduleProgressMonitor(payload.mailSettings);
   await chrome.alarms.clear(DATA_SYNC_ALARM);
 });
 
@@ -382,7 +373,7 @@ function sendNativeMessage(payload) {
 
     try {
       // A persistent port keeps the MV3 service worker alive while a mail sync
-      // waits on IMAP, AI extraction, and Feishu requests.
+      // waits on IMAP and AI extraction.
       port = chrome.runtime.connectNative(MAIL_NATIVE_HOST);
     } catch (error) {
       reject(new Error(error.message || "本地桥接不可用"));
@@ -415,13 +406,6 @@ async function scheduleMailSync(mailSettings = {}) {
   await chrome.alarms.create(MAIL_ALARM, { periodInMinutes });
 }
 
-async function scheduleProgressMonitor(mailSettings = {}) {
-  await chrome.alarms.clear(PROGRESS_ALARM);
-  if (mailSettings.progressAutoSync === false) return;
-  const periodInMinutes = Math.max(30, Number(mailSettings.progressIntervalMinutes) || 720);
-  await chrome.alarms.create(PROGRESS_ALARM, { periodInMinutes });
-}
-
 function mailPayload(mailSettings, settings) {
   const providers = activeAiProviders(settings);
   const primary = providers[0] || {};
@@ -448,39 +432,29 @@ function mailPayload(mailSettings, settings) {
       })),
       timeoutSeconds: 60
     },
-    feishu: {
-      appId: mailSettings.appId,
-      appSecret: mailSettings.appSecret,
-      baseToken: mailSettings.baseToken,
-      tableId: mailSettings.tableId,
-      companyField: mailSettings.companyField || "公司",
-      noteField: mailSettings.noteField || "note",
-      assessmentLinkField: mailSettings.assessmentLinkField || "测评链接",
-      ddlField: mailSettings.ddlField || "ddl",
-      parentField: mailSettings.parentField || "父记录",
-      receivedAtField: mailSettings.receivedAtField || "开始日期",
-      subjectField: mailSettings.subjectField || "最新进展记录",
-      cookieStatusField: mailSettings.cookieStatusField || "Cookie状态",
-      cookieCheckedAtField: mailSettings.cookieCheckedAtField || "Cookie最近检测",
-      monitorEnabledField: mailSettings.monitorEnabledField || "是否巡检"
-    }
   };
 }
 
 function mergeMailHistory(existing, incoming) {
-  const merged = new Map((existing || []).map(item => [item.messageId, item]));
+  const keyOf = item => item.taskKey || `message:${item.messageId}`;
+  const merged = new Map((existing || []).map(item => [keyOf(item), item]));
   (incoming || []).forEach(item => {
-    const previous = merged.get(item.messageId);
+    const previous = merged.get(keyOf(item));
     if (!previous) {
-      merged.set(item.messageId, item);
+      merged.set(keyOf(item), item);
       return;
     }
     const next = { ...previous, ...item };
-    ["company", "category", "deadline", "assessmentUrl", "customNote"].forEach(key => {
+    ["company", "category", "deadline", "assessmentUrl", "customNote", "completedAt"].forEach(key => {
       if (item[key] == null && previous[key] != null) next[key] = previous[key];
     });
-    if (previous.status === "已挂") next.status = "已挂";
-    merged.set(item.messageId, next);
+    if (["已完成", "已忽略", "已挂"].includes(previous.status)) next.status = previous.status;
+    if (previous.companyLocked) {
+      next.company = previous.company;
+      next.companySource = "manual";
+      next.companyLocked = true;
+    }
+    merged.set(keyOf(item), next);
   });
   return [...merged.values()]
     .sort((left, right) => Date.parse(right.receivedAt || 0) - Date.parse(left.receivedAt || 0))
@@ -488,8 +462,8 @@ function mergeMailHistory(existing, incoming) {
 }
 
 async function syncMail({ source = "manual" } = {}) {
-  const { mailSettings = {}, settings = {}, mailHistory = [] } =
-    await chrome.storage.local.get(["mailSettings", "settings", "mailHistory"]);
+  const { mailSettings = {}, settings = {}, mailHistory = [], mailCompanyAliases = {} } =
+    await chrome.storage.local.get(["mailSettings", "settings", "mailHistory", "mailCompanyAliases"]);
   const startedAt = new Date().toISOString();
   await chrome.storage.local.set({
     mailSyncStatus: { state: "syncing", source, startedAt }
@@ -498,23 +472,28 @@ async function syncMail({ source = "manual" } = {}) {
     const response = await sendNativeMessage(mailPayload(mailSettings, settings));
     if (!response.ok) throw new Error(response.error || "邮件同步失败");
     const summary = response.summary || {};
-    const nextHistory = mergeMailHistory(mailHistory, summary.details);
+    const details = (summary.details || []).map(item => {
+      const alias = item.companyRaw && mailCompanyAliases[String(item.companyRaw).trim()];
+      return alias && !item.companyLocked ? { ...item, company: alias, companySource: "manual", companyLocked: true, needsCompanyReview: false } : item;
+    });
+    const nextHistory = mergeMailHistory(mailHistory, details);
     const mailSyncStatus = {
       state: "success",
       source,
       startedAt,
       finishedAt: new Date().toISOString(),
       summary: {
-        fetched: summary.fetched || 0,
-        updated: summary.updated || 0,
+         fetched: summary.fetched || 0,
+        newTasks: summary.new_tasks || summary.newTasks || 0,
+         duplicates: summary.duplicates || 0,
         irrelevant: summary.irrelevant || 0,
         alreadyProcessed: summary.already_processed || 0,
-        needsReview: summary.needs_review || 0,
+        needsReview: summary.needs_review || summary.needsCompanyReview || 0,
         failed: summary.failed || 0
       }
     };
     await chrome.storage.local.set({ mailHistory: nextHistory, mailSyncStatus });
-    return { ok: true, summary: mailSyncStatus.summary, details: summary.details || [] };
+    return { ok: true, summary: mailSyncStatus.summary, details };
   } catch (error) {
     const mailSyncStatus = {
       state: "error",
@@ -528,321 +507,14 @@ async function syncMail({ source = "manual" } = {}) {
   }
 }
 
-async function monitorProgress(channelId = "") {
-  if (CHROME_ONLY_CHANNELS.has(channelId)) return monitorChannelInChrome(channelId);
-  const { mailSettings = {}, settings = {}, progressMonitorStatus = {} } =
-    await chrome.storage.local.get(["mailSettings", "settings", "progressMonitorStatus"]);
-  const startedAt = new Date().toISOString();
-  await chrome.storage.local.set({
-    progressMonitorStatus: {
-      ...progressMonitorStatus,
-      state: "running",
-      startedAt,
-      runningChannelId: channelId
-    }
-  });
-  try {
-    const response = await sendNativeMessage({
-      ...mailPayload(mailSettings, settings),
-      action: "trackProgress",
-      channelId
-    });
-    if (!response.ok) throw new Error(response.error || "进展巡检失败");
-    const previousChannels = progressMonitorStatus.channels || [];
-    const receivedChannels = response.channels || [];
-    const channels = channelId
-      ? [
-        ...previousChannels.filter(channel => channel.channel_id !== channelId),
-        ...receivedChannels
-      ]
-      : receivedChannels;
-    const status = {
-      state: "success",
-      startedAt,
-      finishedAt: new Date().toISOString(),
-      updated: response.updated || 0,
-      channels,
-      runningChannelId: ""
-    };
-    await chrome.storage.local.set({ progressMonitorStatus: status });
-    return { ok: true, ...status };
-  } catch (error) {
-    const status = {
-      ...progressMonitorStatus,
-      state: "error",
-      startedAt,
-      finishedAt: new Date().toISOString(),
-      error: error.message || "进展巡检失败",
-      runningChannelId: ""
-    };
-    await chrome.storage.local.set({ progressMonitorStatus: status });
-    throw error;
-  }
-}
-
-async function syncProgressChannels() {
-  const { mailSettings = {}, settings = {}, progressMonitorStatus = {} } =
-    await chrome.storage.local.get(["mailSettings", "settings", "progressMonitorStatus"]);
-  const response = await sendNativeMessage({
-    ...mailPayload(mailSettings, settings),
-    action: "listProgressChannels"
-  });
-  if (!response.ok) throw new Error(response.error || "读取巡检渠道失败");
-  const status = {
-    ...progressMonitorStatus,
-    channels: response.channels || [],
-    catalogRefreshedAt: new Date().toISOString()
-  };
-  await chrome.storage.local.set({ progressMonitorStatus: status });
-  return { ok: true, ...status };
-}
-
-// 定位当前渠道已登录的投递页标签：优先用“Chrome 登录”记录的标签，
-// 失效时回退到任意打开在该站点的标签，避免用户重开标签后读不到状态。
-async function resolveChannelTabId(channelId, progressLoginTabs) {
-  const savedTabId = progressLoginTabs[channelId];
-  if (savedTabId) {
-    const tab = await chrome.tabs.get(savedTabId).catch(() => null);
-    if (tab?.id) return tab.id;
-  }
-  const expectedUrl = progressChannelUrls[channelId];
-  if (!expectedUrl) return null;
-  const host = new URL(expectedUrl).hostname;
-  const tabs = await chrome.tabs.query({ url: `*://${host}/*` });
-  return tabs[0]?.id ?? null;
-}
-
-async function monitorChannelInChrome(channelId) {
-  const { progressLoginTabs = {}, mailSettings = {}, settings = {}, progressMonitorStatus = {} } =
-    await chrome.storage.local.get(["progressLoginTabs", "mailSettings", "settings", "progressMonitorStatus"]);
-  const tabId = await resolveChannelTabId(channelId, progressLoginTabs);
-  if (!tabId) throw new Error("请先点击“① 登录”，在打开的标签页完成登录后再点“② 连接并验证”");
-  const [result] = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: () => ({ url: location.href, text: document.body?.innerText?.slice(0, 3000) || "" })
-  });
-  const text = result?.result?.text || "";
-  const url = result?.result?.url || "";
-  const onLoginPage = /\/login|passport|\/account|sso|手机号登录|验证码/.test(`${url} ${text}`);
-  const status = onLoginPage
-    ? "已过期"
-    : /投递|应聘|申请|简历|记录/.test(text) ? "生效中" : "读取失败";
-  const detail = status === "生效中"
-    ? "当前 Chrome 投递页可读取"
-    : status === "已过期" ? "当前 Chrome 页面要求登录，请在该标签页重新登录" : "当前 Chrome 页面未识别投递信息";
-  const response = await sendNativeMessage({
-    ...mailPayload(mailSettings, settings),
-    action: "recordVisibleProgress",
-    channelId,
-    status,
-    detail
-  });
-  if (!response.ok) throw new Error(response.error || "可见巡检失败");
-  const channels = [
-    ...(progressMonitorStatus.channels || []).filter(channel => channel.channel_id !== channelId),
-    ...(response.channels || [])
-  ];
-  const next = {
-    state: "success",
-    finishedAt: new Date().toISOString(),
-    startedAt: new Date().toISOString(),
-    updated: response.updated || 0,
-    channels,
-    runningChannelId: ""
-  };
-  await chrome.storage.local.set({ progressMonitorStatus: next });
-  return { ok: true, ...next };
-}
-
-async function startProgressLogin(channelId) {
-  const { mailSettings = {}, settings = {} } =
-    await chrome.storage.local.get(["mailSettings", "settings"]);
-  const response = await sendNativeMessage({
-    ...mailPayload(mailSettings, settings),
-    action: "startProgressLogin",
-    channelId
-  });
-  if (!response.ok) throw new Error(response.error || "无法启动登录窗口");
-  return response;
-}
-
-const progressChannelUrls = {
-  bytedance: "https://jobs.bytedance.com/campus/position/application",
-  baidu: "https://talent.baidu.com/jobs/center",
-  xiaomi_feishu: "https://xiaomi.jobs.f.mioffice.cn/internship/position/application",
-  shokz: "https://campus.shokz.com.cn/#/candidateHome/applications",
-  nio_feishu: "https://nio.jobs.feishu.cn/campus/position/application",
-  jd: "https://campus.jd.com/#/myDeliver?type=present",
-  pdd: "https://careers.pddglobalhr.com/campus/personal-center",
-  oppo: "https://careers.oppo.com/university/oppo/center/history",
-  iflytek: "https://iflytek.zhiye.com/personal/deliveryRecord",
-  kuaishou: "https://campus.kuaishou.cn/recruit/campus/e/#/campus/my-apply",
-  dji: "https://apply.careers.dji.com/candidate/applications/deliver-query/dji",
-  vivo: "https://hr-campus.vivo.com/personal/deliveryRecord"
-};
-
-async function openChromeProgressLogin(channelId) {
-  const url = progressChannelUrls[channelId];
-  if (!url) throw new Error("不支持的招聘渠道");
-  const tab = await chrome.tabs.create({ url, active: true });
-  await chrome.storage.local.set({
-    progressLoginTabs: { ...(await chrome.storage.local.get("progressLoginTabs")).progressLoginTabs, [channelId]: tab.id }
-  });
-  return { ok: true, tabId: tab.id };
-}
-
-// 招聘站常把登录态放在兄弟子域（passport/sso/account）。按“可注册主域”抓取，
-// 才能把这些跨子域的登录 Cookie 一并保存，否则注入后网站会判为未登录。
-const MULTI_PART_TLDS = new Set([
-  "com.cn", "net.cn", "org.cn", "gov.cn", "edu.cn",
-  "com.hk", "com.tw", "co.jp", "co.uk", "com.sg"
-]);
-
-function registrableDomain(hostname) {
-  const host = String(hostname || "").replace(/^\.+/, "").toLowerCase();
-  const labels = host.split(".").filter(Boolean);
-  if (labels.length <= 2) return host;
-  const lastTwo = labels.slice(-2).join(".");
-  // 处理 shokz.com.cn 这类二级公共后缀，需保留三段。
-  if (MULTI_PART_TLDS.has(lastTwo)) return labels.slice(-3).join(".");
-  return lastTwo;
-}
-
-// 通过投递页执行脚本，读取 localStorage / sessionStorage，
-// 覆盖把 token 放在 storage（北森 / feishu 系）而非 Cookie 的站点。
-async function readTabStorage(tabId, tabUrl) {
-  try {
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => {
-        const dump = store => {
-          const items = [];
-          try {
-            for (let i = 0; i < store.length; i += 1) {
-              const name = store.key(i);
-              if (name !== null) items.push({ name, value: store.getItem(name) ?? "" });
-            }
-          } catch (error) { /* 跨源或被禁用时忽略 */ }
-          return items;
-        };
-        return {
-          origin: location.origin,
-          localStorage: dump(window.localStorage),
-          sessionStorage: dump(window.sessionStorage)
-        };
-      }
-    });
-    return result?.result || null;
-  } catch (error) {
-    // 无法读取 storage 不应阻断 Cookie 保存，返回空即可。
-    return null;
-  }
-}
-
-async function saveChromeProgressSession(channelId) {
-  const { progressLoginTabs = {}, mailSettings = {}, settings = {} } =
-    await chrome.storage.local.get(["progressLoginTabs", "mailSettings", "settings"]);
-  const tabId = progressLoginTabs[channelId];
-  if (!tabId) throw new Error("请先点击“使用 Chrome 登录”并在该标签页完成登录");
-  const tab = await chrome.tabs.get(tabId).catch(() => null);
-  if (!tab?.url) throw new Error("登录标签页已关闭，请重新打开并完成登录");
-  const expectedUrl = progressChannelUrls[channelId];
-  if (!expectedUrl || new URL(tab.url).hostname !== new URL(expectedUrl).hostname) {
-    throw new Error("请返回对应招聘网站的登录标签页后再保存会话");
-  }
-  // 按可注册主域抓取全部子域 Cookie（含 passport/sso/account 等登录态），
-  // 而非仅 tab.url 能收到的那一组。
-  const domain = registrableDomain(new URL(tab.url).hostname);
-  const cookies = await chrome.cookies.getAll({ domain });
-  if (!cookies.length) throw new Error("当前页面没有可保存的会话，请确认已完成登录");
-  const storage = await readTabStorage(tabId, tab.url);
-  const response = await sendNativeMessage({
-    ...mailPayload(mailSettings, settings),
-    action: "saveProgressCookies",
-    channelId,
-    cookies,
-    storage
-  });
-  if (!response.ok) throw new Error(response.error || "保存登录会话失败");
-  return response;
-}
-
-// 一步式向导：保存会话 → 立即验证 → 回写飞书，合并为一次调用，避免用户在
-// “保存会话 / 刷新验证”之间来回点击与串联 alert。
-async function saveAndVerifyProgressSession(channelId) {
-  // 百度 / OPPO / 大疆无法无头还原登录态，保存 Cookie 没有意义。直接读取
-  // 已完成验证的
-  // Chrome 标签页判定状态并回写飞书。
-  if (CHROME_ONLY_CHANNELS.has(channelId)) {
-    try {
-      const verified = await monitorChannelInChrome(channelId);
-      const channel = (verified.channels || []).find(item => item.channel_id === channelId);
-      return {
-        ok: true,
-        saved: true,
-        verified: true,
-        chromeOnly: true,
-        name: channel?.name || "",
-        savedCookies: 0,
-        updated: verified.updated || 0,
-        status: channel?.status || "",
-        detail: channel?.detail || "",
-        ...verified
-      };
-    } catch (error) {
-      const message = error?.message || "验证失败";
-      return {
-        ok: true,
-        saved: false,
-        verified: false,
-        chromeOnly: true,
-        savedCookies: 0,
-        needsMonitorToggle: message.includes("是否巡检"),
-        verifyError: message
-      };
-    }
-  }
-  const saved = await saveChromeProgressSession(channelId);
-  try {
-    const verified = await monitorProgress(channelId);
-    const channel = (verified.channels || []).find(item => item.channel_id === channelId);
-    return {
-      ok: true,
-      saved: true,
-      verified: true,
-      name: saved.name,
-      savedCookies: saved.cookies || 0,
-      updated: verified.updated || 0,
-      status: channel?.status || "",
-      detail: channel?.detail || "",
-      ...verified
-    };
-  } catch (error) {
-    // 会话已加密保存成功；验证阶段若因“未开启巡检”失败，柔性引导用户去飞书打开开关，
-    // 而不是把整个流程判为失败让用户误以为登录态没存上。
-    const message = error?.message || "验证失败";
-    return {
-      ok: true,
-      saved: true,
-      verified: false,
-      name: saved.name,
-      savedCookies: saved.cookies || 0,
-      needsMonitorToggle: message.includes("是否巡检"),
-      verifyError: message
-    };
-  }
-}
-
 chrome.runtime.onStartup.addListener(async () => {
   const { mailSettings = {} } = await chrome.storage.local.get(["mailSettings"]);
   await scheduleMailSync(mailSettings);
-  await scheduleProgressMonitor(mailSettings);
   await chrome.alarms.clear(DATA_SYNC_ALARM);
 });
 
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === MAIL_ALARM) syncMail({ source: "alarm" }).catch(() => {});
-  if (alarm.name === PROGRESS_ALARM) monitorProgress().catch(() => {});
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -867,10 +539,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message.type === "MAIL_SETTINGS_CHANGED") {
-    Promise.all([
-      scheduleMailSync(message.mailSettings || {}),
-      scheduleProgressMonitor(message.mailSettings || {})
-    ])
+    scheduleMailSync(message.mailSettings || {})
       .then(() => sendResponse({ ok: true }))
       .catch(error => sendResponse({ ok: false, error: error.message }));
     return true;
@@ -887,21 +556,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(error => sendResponse({ ok: false, error: error.message }));
     return true;
   }
-  if (message.type === "MAIL_MANUAL_ACTION") {
-    chrome.storage.local.get(["mailSettings", "settings"]).then(({ mailSettings = {}, settings = {} }) =>
-      sendNativeMessage({
-        ...mailPayload(mailSettings, settings),
-        action: "manualMailAction",
-        messageId: message.messageId,
-        mailAction: message.mailAction,
-        mailSnapshot: message.mailSnapshot
-      })
-    ).then(sendResponse).catch(error => sendResponse({
-      ok: false,
-      error: error.message || "邮件操作失败"
-    }));
-    return true;
-  }
   if (message.type === "MAIL_IMPORT_LOCAL_CONFIG") {
     sendNativeMessage({ action: "localConfig" })
       .then(sendResponse)
@@ -912,48 +566,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     resolveCompanyNames(message)
       .then(sendResponse)
       .catch(error => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-  if (message.type === "PROGRESS_CHANNELS") {
-    syncProgressChannels().then(sendResponse).catch(error => sendResponse({
-      ok: false,
-      error: error.message || "读取巡检渠道失败"
-    }));
-    return true;
-  }
-  if (message.type === "PROGRESS_MONITOR") {
-    monitorProgress(String(message.channelId || "")).then(sendResponse).catch(error => sendResponse({
-      ok: false,
-      error: error.message || "进展巡检失败"
-    }));
-    return true;
-  }
-  if (message.type === "PROGRESS_LOGIN") {
-    startProgressLogin(message.channelId).then(sendResponse).catch(error => sendResponse({
-      ok: false,
-      error: error.message || "无法启动登录窗口"
-    }));
-    return true;
-  }
-  if (message.type === "PROGRESS_CHROME_LOGIN") {
-    openChromeProgressLogin(message.channelId).then(sendResponse).catch(error => sendResponse({
-      ok: false,
-      error: error.message || "无法打开登录页面"
-    }));
-    return true;
-  }
-  if (message.type === "PROGRESS_SAVE_CHROME_SESSION") {
-    saveChromeProgressSession(message.channelId).then(sendResponse).catch(error => sendResponse({
-      ok: false,
-      error: error.message || "保存登录会话失败"
-    }));
-    return true;
-  }
-  if (message.type === "PROGRESS_SAVE_AND_VERIFY") {
-    saveAndVerifyProgressSession(message.channelId).then(sendResponse).catch(error => sendResponse({
-      ok: false,
-      error: error.message || "保存并验证登录态失败"
-    }));
     return true;
   }
   if (message.type === "AI_MATCH_FIELDS") {
