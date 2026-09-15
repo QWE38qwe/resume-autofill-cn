@@ -101,6 +101,11 @@
       }
     };
 
+    const dateWriteOrder = [];
+    ["start", "end"].forEach(id => {
+      document.getElementById(id).addEventListener("input", () => dateWriteOrder.push(id));
+    });
+
     window.runHotjobFixture = () => new Promise((resolve, reject) => {
       if (!contentListener) {
         reject(new Error("content listener not registered"));
@@ -112,6 +117,7 @@
           hasWork: document.querySelector("#hasWork").value,
           start: document.querySelector("#start").value,
           end: document.querySelector("#end").value,
+          dateWriteOrder,
           company: document.querySelector("#company").value,
           department: document.querySelector("#department").value,
           position: document.querySelector("#position").value,
@@ -120,6 +126,7 @@
         result.pass = result.hasWork === "是" &&
           result.start.includes("2026") &&
           result.end.includes("2026") &&
+          result.dateWriteOrder.join("|") === "end|start" &&
           result.company === "示例科技有限公司" &&
           result.department === "产品部" &&
           result.position === "产品实习生" &&

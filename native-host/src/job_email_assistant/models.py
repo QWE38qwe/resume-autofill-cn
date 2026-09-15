@@ -12,6 +12,8 @@ class ParsedEmail:
     sender: str
     received_at: datetime
     text: str
+    # 保留少量邮件头，供系统回执/自动回复硬过滤使用；正文仍视为不可信数据。
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -38,7 +40,7 @@ class Extraction:
         ):
             if getattr(self, name) is None:
                 setattr(self, name, getattr(other, name))
-        self.is_recruitment = self.is_recruitment or other.is_recruitment
+        # 分类准入由 service 在字段合并前决定；补字段不能把非任务提升为任务。
         self.confidence = max(self.confidence, other.confidence)
         self.needs_review = self.needs_review or other.needs_review
         self.evidence.extend(item for item in other.evidence if item not in self.evidence)

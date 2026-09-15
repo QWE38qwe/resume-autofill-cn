@@ -18,6 +18,23 @@ from .models import ParsedEmail
 logger = logging.getLogger(__name__)
 
 
+def _strip_quoted_history(value: str) -> str:
+    """只保留当前邮件正文，避免引用历史/签名中的“测评/面试”触发分类。"""
+    lines: list[str] = []
+    for line in value.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(">"):
+            continue
+        if stripped and (
+            stripped.startswith(("原邮件", "Original Message", "发件人:", "From:"))
+            or " wrote:" in stripped
+            or " 写道：" in stripped
+        ):
+            break
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
 def recent_messages(
     messages: list[ParsedEmail],
     lookback_hours: int,
@@ -67,7 +84,7 @@ def _message_text(message: Message) -> str:
         for anchor in soup.select("a[href]")
         if str(anchor["href"]).startswith(("http://", "https://"))
     ]
-    sections = ["\n".join(plain).strip()] if plain else [html_text]
+    sections = [_strip_quoted_history("\n".join(plain).strip())] if plain else [_strip_quoted_history(html_text)]
     sections.extend(dict.fromkeys(hrefs))
     return "\n".join(section for section in sections if section).strip()
 
@@ -87,6 +104,11 @@ def parse_message(raw: bytes, uid: str = "") -> ParsedEmail:
         sender=_decode_header(message.get("From")),
         received_at=received_at,
         text=_message_text(message),
+        headers={
+            key.lower(): _decode_header(message.get(key))
+            for key in ("Auto-Submitted", "Precedence", "Content-Type", "Return-Path")
+            if message.get(key)
+        },
     )
 
 

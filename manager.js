@@ -167,7 +167,6 @@ let modalCtx = null;
 let openedVersionId = null;
 let parsedDraft = null;
 let mailNoteTimer = null;
-let mailCalendarNoteTimer = null;
 let mailCalendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 let mailSelectedDateKey = localDateKey(new Date());
 let mailAgendaExpanded = false;
@@ -216,7 +215,20 @@ async function init() {
   db.mailHistory = repairedMail.history;
   db.mailCompanyAliases = db.mailCompanyAliases || {};
   if (repairedMail.changed) await chrome.storage.local.set({ mailHistory: db.mailHistory });
-  db.mailCalendarNotes = db.mailCalendarNotes || {};
+  const legacyCalendarNotes = db.mailCalendarNotes || {};
+  const hasStoredCalendarTodos = Boolean(db.mailCalendarTodos);
+  db.mailCalendarTodos = db.mailCalendarTodos && typeof db.mailCalendarTodos === "object"
+    ? db.mailCalendarTodos
+    : {};
+  if (!hasStoredCalendarTodos && Object.keys(legacyCalendarNotes).length) {
+    Object.entries(legacyCalendarNotes).forEach(([dateKey, text]) => {
+      const value = String(text || "").trim();
+      if (!value) return;
+      db.mailCalendarTodos[dateKey] = [{ id: mailCalendarTodoId(), text: value, completed: false }];
+    });
+    db.mailCalendarNotes = {};
+    await chrome.storage.local.set({ mailCalendarTodos: db.mailCalendarTodos, mailCalendarNotes: {} });
+  }
   db.mailViewPreference = "board";
   Object.keys(schemas).forEach(type => {
     db[type] = db[type] || [];
@@ -1673,29 +1685,66 @@ function localDateTimeValue(value) {
   return `${localDateKey(date)}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+function localDateValue(value) {
+  const date = parseMailDate(value);
+  return date ? localDateKey(date) : "";
+}
+
 function mailTaskDate(item) {
   if (item.status === "已完成" && item.completedAt) return parseMailDate(item.completedAt);
   return parseMailDate(item.deadline);
 }
 
-function mailTimingLabel(item) {
-  if (item.status !== "已完成" || !item.completedAt || !item.deadline) return "";
-  const completed = parseMailDate(item.completedAt);
-  const deadline = parseMailDate(item.deadline);
-  if (!completed || !deadline) return "";
-  const minutes = Math.round(Math.abs(completed - deadline) / 60000);
-  const amount = minutes >= 1440
-    ? `${Math.floor(minutes / 1440)} 天`
-    : minutes >= 60 ? `${Math.floor(minutes / 60)} 小时` : `${minutes} 分钟`;
-  return completed <= deadline ? `提前 ${amount}` : `逾期 ${amount}`;
+function mailTaskDedupKey(item, fallback) {
+  const company = String(item.company || "").trim().replace(/\s+/g, " ").toLocaleLowerCase("zh-CN");
+  const deadline = localDateTimeValue(item.deadline);
+  return company && deadline ? `${company}\u0000${deadline}` : `__record_${fallback}`;
+}
+
+function mailTaskMessageIds(value) {
+  try {
+    const ids = JSON.parse(value || "[]");
+    return Array.isArray(ids) ? ids.filter(Boolean) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function mailCalendarTodoId() {
+  return `todo-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function mailCalendarTodos(dateKey) {
+  const todos = db.mailCalendarTodos?.[dateKey];
+  return Array.isArray(todos)
+    ? todos.filter(todo => String(todo?.text || "").trim())
+    : [];
+}
+
+async function saveMailCalendarTodos() {
+  await chrome.storage.local.set({ mailCalendarTodos: db.mailCalendarTodos });
 }
 
 function mailCalendarEvents() {
   const categories = new Set(["在线测评", "ai面试", "面试邀约"]);
-  return filteredMailHistory()
+  const groups = new Map();
+  filteredMailHistory()
     .filter(item => categories.has(item.category) && mailTaskDate(item))
-    .map(item => ({ item, date: mailTaskDate(item) }))
-    .sort((left, right) => left.date - right.date);
+    .forEach((item, index) => {
+      const key = mailTaskDedupKey(item, index);
+      const group = groups.get(key) || [];
+      group.push(item);
+      groups.set(key, group);
+    });
+  return [...groups.values()].map(group => {
+    const completed = group.find(item => item.status === "已完成" && item.completedAt);
+    const item = completed || group[0];
+    return {
+      item,
+      date: mailTaskDate(item),
+      messageIds: group.map(entry => entry.messageId).filter(Boolean)
+    };
+  }).sort((left, right) => left.date - right.date);
 }
 
 function renderMailView() {
@@ -1722,6 +1771,7 @@ function renderMailCalendar() {
     date.setDate(gridStart.getDate() + index);
     const key = localDateKey(date);
     const dayEvents = events.filter(event => localDateKey(event.date) === key);
+    const dayTodos = mailCalendarTodos(key);
     cells.push(`
       <button type="button" class="mail-calendar-day${date.getMonth() !== month ? " is-outside" : ""}${key === todayKey ? " is-today" : ""}${key === mailSelectedDateKey ? " is-selected" : ""}" data-calendar-date="${key}">
         <span class="mail-calendar-day-number">${date.getDate()}</span>
@@ -1733,6 +1783,8 @@ function renderMailCalendar() {
             </span>
           `).join("")}
           ${dayEvents.length > 3 ? `<span class="mail-calendar-more">还有 ${dayEvents.length - 3} 项</span>` : ""}
+          ${dayTodos.slice(0, 1).map(todo => `<span class="mail-calendar-todo${todo.completed ? " is-completed" : ""}"><span>${todo.completed ? "✓" : "○"}</span><b>${safe(todo.text)}</b></span>`).join("")}
+          ${dayTodos.length > 1 ? `<span class="mail-calendar-more">还有 ${dayTodos.length - 1} 条 Todo</span>` : ""}
         </span>
       </button>
     `);
@@ -1747,35 +1799,55 @@ function renderMailDayAgenda(events = mailCalendarEvents()) {
     ? new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(selected)
     : mailSelectedDateKey;
   const items = events.filter(event => localDateKey(event.date) === mailSelectedDateKey);
-  $("#mailDayAgenda").innerHTML = items.length ? items.map(({ item, date }) => {
+  $("#mailDayAgenda").innerHTML = items.length ? items.map(({ item, messageIds }) => {
     const link = httpUrl(item.assessmentUrl);
-    const timing = mailTimingLabel(item);
+    const taskIds = safeAttr(JSON.stringify(messageIds));
+    const completed = item.status === "已完成";
+    const completedDate = localDateValue(item.completedAt);
     return `
-      <article class="mail-agenda-item ${item.status === "已完成" ? "is-completed" : ""}">
-        <div class="mail-agenda-copy"><strong>${safe(item.company || "无法确定公司")}</strong><p title="${safeAttr(item.subject || "")}">${safe(item.subject || "无主题")}</p></div>
-        <div class="mail-agenda-time"><time>${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}</time><span>${safe(item.category || "待办")}</span></div>
-        <div class="mail-agenda-meta">
-          <span>${item.deadline ? `DDL ${safe(formatMailTime(item.deadline))}` : "无 DDL"}</span>
-          ${timing ? `<span class="mail-timing ${timing.startsWith("逾期") ? "late" : "early"}">${safe(timing)}</span>` : ""}
+      <article class="mail-agenda-item ${completed ? "is-completed" : ""}">
+        <div class="mail-agenda-copy">
+          <div class="mail-agenda-title">
+            <span class="mail-agenda-status" aria-label="${completed ? "已完成" : "未完成"}">${completed ? "●" : "○"}</span>
+            <strong>${safe(item.company || "无法确定公司")}</strong>
+            <span class="mail-agenda-separator">·</span>
+            <span class="mail-category">${safe(item.category || "待办")}</span>
+          </div>
+          <p>DDL ${item.deadline ? safe(formatMailTime(item.deadline)) : "—"}</p>
+          <div class="mail-completed-date">
+            <span>完成日期</span>
+            <span class="mail-completed-value">${safe(completedDate || "—")}</span>
+            ${completed
+              ? `<input class="mail-completed-at" data-message-ids="${taskIds}" type="date" value="${safeAttr(completedDate)}" aria-label="修改完成日期">`
+              : ""}
+          </div>
         </div>
         <div class="mail-agenda-actions">
-          ${link ? `<a class="mail-open" href="${safeAttr(link)}" target="_blank" rel="noopener">打开链接 ↗</a>` : ""}
-          ${item.status === "已完成"
-            ? `<input class="mail-completed-at" data-message-id="${safeAttr(item.messageId)}" type="datetime-local" value="${safeAttr(localDateTimeValue(item.completedAt))}" aria-label="修改完成时间">`
-            : `<button type="button" class="btn primary small mail-complete" data-message-id="${safeAttr(item.messageId)}">标记完成</button>`}
+          ${completed ? "" : `<button type="button" class="btn primary small mail-complete" data-message-ids="${taskIds}">已完成</button>`}
+          ${link ? `<a class="mail-open" href="${safeAttr(link)}" target="_blank" rel="noopener">打开链接</a>` : ""}
+          <button type="button" class="btn ghost small danger-btn mail-delete" data-message-ids="${taskIds}">删除</button>
         </div>
       </article>
     `;
   }).join("") : '<div class="empty compact">当天没有邮件待办</div>';
-  $("#mailCalendarNote").value = db.mailCalendarNotes?.[mailSelectedDateKey] || "";
+  const todos = mailCalendarTodos(mailSelectedDateKey);
+  $("#mailCalendarTodos").innerHTML = todos.length ? todos.map(todo => `
+    <div class="mail-todo-item${todo.completed ? " is-completed" : ""}">
+      <button class="mail-todo-toggle" type="button" data-todo-id="${safeAttr(todo.id)}" aria-label="${todo.completed ? "标记为未完成" : "标记为完成"}">${todo.completed ? "✓" : "○"}</button>
+      <span>${safe(todo.text)}</span>
+      <button class="mail-todo-delete" type="button" data-todo-id="${safeAttr(todo.id)}" aria-label="删除 Todo">×</button>
+    </div>
+  `).join("") : '<div class="empty compact">当天还没有 Todo</div>';
 }
 
 function filteredMailHistory() {
+  const companyQuery = String($("#mailCompanyFilter")?.value || "").trim().toLocaleLowerCase("zh-CN");
   const status = $("#mailStatusFilter").value;
   const category = $("#mailCategoryFilter").value;
   const sort = $("#mailSort").value;
   const rows = (db.mailHistory || []).filter(item =>
-    (status === "__default__" ? item.status !== "已忽略" : (!status || item.status === status)) &&
+    (!companyQuery || String(item.company || "").toLocaleLowerCase("zh-CN").includes(companyQuery)) &&
+    (status === "__default__" ? !["已忽略", "待确认"].includes(item.status) : (!status || item.status === status)) &&
     (!category || item.category === category)
   );
   const timestamp = value => {
@@ -1819,7 +1891,7 @@ function renderMailDashboard() {
   $("#mailHistoryTable").innerHTML = `
     <div class="mail-table-wrap">
       <table class="mail-table">
-        <thead><tr><th>状态</th><th>公司</th><th>邮件标题</th><th>分类</th><th>DDL</th><th>接收时间</th><th>完成时间</th><th>自定义备注</th><th>操作</th></tr></thead>
+        <thead><tr><th>状态</th><th>公司</th><th>邮件标题</th><th>分类</th><th>DDL</th><th>接收时间</th><th>完成日期</th><th>自定义备注</th><th>操作</th></tr></thead>
         <tbody>
           ${rows.map(item => {
             const link = httpUrl(item.assessmentUrl);
@@ -1832,7 +1904,7 @@ function renderMailDashboard() {
                 <td>${item.deadline ? `<time>${safe(item.deadline)}</time>` : '<span class="cell-empty">—</span>'}</td>
                 <td><time>${safe(formatMailTime(item.receivedAt))}</time></td>
                 <td>${item.status === "已完成"
-                  ? `<input class="mail-completed-at" data-message-id="${safeAttr(item.messageId)}" type="datetime-local" value="${safeAttr(localDateTimeValue(item.completedAt))}" aria-label="修改完成时间">`
+                  ? `<input class="mail-completed-at" data-message-id="${safeAttr(item.messageId)}" type="date" value="${safeAttr(localDateValue(item.completedAt))}" aria-label="修改完成日期">`
                   : '<span class="cell-empty">—</span>'}</td>
                 <td><input class="mail-note" data-message-id="${safeAttr(item.messageId)}" value="${safeAttr(item.customNote || "")}" placeholder="添加备注" aria-label="自定义备注"></td>
                 <td><div class="mail-actions">
@@ -1911,7 +1983,10 @@ $("#syncMailNow").addEventListener("click", async () => {
   button.disabled = true;
   button.textContent = "同步中…";
   try {
-    const mailSettings = await persistMailSettings(false);
+    // 立即同步只更新本地看板，不触发自动同步调度或任何外部表格写入。
+    const mailSettings = mailSettingsFromForm();
+    db.mailSettings = mailSettings;
+    await chrome.storage.local.set({ mailSettings });
     if (!activeAiProviders().length) throw new Error("请先在设置中启用至少一个 AI 模型版本");
     const result = await chrome.runtime.sendMessage({
       type: "MAIL_SYNC"
@@ -1938,6 +2013,7 @@ $("#goAiSettings")?.addEventListener("click", () => activateTab("api"));
 $("#mailStatusFilter").addEventListener("change", renderMailDashboard);
 $("#mailCategoryFilter").addEventListener("change", renderMailDashboard);
 $("#mailSort").addEventListener("change", renderMailDashboard);
+$("#mailCompanyFilter").addEventListener("input", renderMailDashboard);
 $$("[data-mail-view]").forEach(button => button.addEventListener("click", () => {
   db.mailViewPreference = button.dataset.mailView === "calendar" ? "calendar" : "board";
   renderMailView();
@@ -1969,16 +2045,19 @@ $("#mailAgendaToggle").addEventListener("click", () => {
   mailAgendaExpanded = !mailAgendaExpanded;
   renderMailView();
 });
-$("#mailCalendarNote").addEventListener("input", event => {
-  clearTimeout(mailCalendarNoteTimer);
-  const value = event.target.value;
+$("#mailTodoForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const input = $("#mailTodoInput");
+  const text = input.value.trim();
+  if (!text) return;
   const dateKey = mailSelectedDateKey;
-  mailCalendarNoteTimer = setTimeout(async () => {
-    db.mailCalendarNotes = { ...(db.mailCalendarNotes || {}) };
-    if (value.trim()) db.mailCalendarNotes[dateKey] = value.trim();
-    else delete db.mailCalendarNotes[dateKey];
-    await chrome.storage.local.set({ mailCalendarNotes: db.mailCalendarNotes });
-  }, 350);
+  db.mailCalendarTodos = { ...(db.mailCalendarTodos || {}) };
+  db.mailCalendarTodos[dateKey] = [...mailCalendarTodos(dateKey), {
+    id: mailCalendarTodoId(), text, completed: false, createdAt: new Date().toISOString()
+  }];
+  await saveMailCalendarTodos();
+  input.value = "";
+  renderMailCalendar();
 });
 $("#mailHistoryTable").addEventListener("input", event => {
   const input = event.target.closest(".mail-note");
@@ -1997,16 +2076,28 @@ async function runMailAction(messageId, action) {
   const statusMap = { completed: "已完成", hung: "已挂", ignored: "已忽略" };
   const status = statusMap[action];
   if (!status) return;
-  const existing = (db.mailHistory || []).find(item => item.messageId === messageId);
+  const messageIds = Array.isArray(messageId) ? messageId : [messageId];
+  const messageIdSet = new Set(messageIds.filter(Boolean));
+  if (!messageIdSet.size) return;
+  const existing = (db.mailHistory || []).find(item => messageIdSet.has(item.messageId));
   const completedAt = action === "completed"
     ? (existing?.completedAt || new Date().toISOString())
     : (status === "已完成" ? existing?.completedAt || null : null);
-  db.mailHistory = (db.mailHistory || []).map(item => item.messageId === messageId
+  db.mailHistory = (db.mailHistory || []).map(item => messageIdSet.has(item.messageId)
     ? { ...item, status, completedAt }
     : item);
   await chrome.storage.local.set({ mailHistory: db.mailHistory });
   renderMailDashboard();
   toast(`已标记为${status}`, "success");
+}
+
+async function deleteMailTasks(messageIds) {
+  const messageIdSet = new Set(messageIds.filter(Boolean));
+  if (!messageIdSet.size) return;
+  db.mailHistory = (db.mailHistory || []).filter(item => !messageIdSet.has(item.messageId));
+  await chrome.storage.local.set({ mailHistory: db.mailHistory });
+  renderMailDashboard();
+  toast("邮件待办已删除", "success");
 }
 
 $("#mailHistoryTable").addEventListener("change", async event => {
@@ -2045,23 +2136,66 @@ $("#mailHistoryTable").addEventListener("change", async event => {
   }
 });
 $("#mailCalendarView").addEventListener("click", async event => {
-  const button = event.target.closest(".mail-complete");
-  if (!button) return;
-  button.disabled = true;
+  const todoToggle = event.target.closest(".mail-todo-toggle");
+  if (todoToggle) {
+    const todoId = todoToggle.dataset.todoId;
+    db.mailCalendarTodos = { ...(db.mailCalendarTodos || {}) };
+    db.mailCalendarTodos[mailSelectedDateKey] = mailCalendarTodos(mailSelectedDateKey).map(todo =>
+      todo.id === todoId ? { ...todo, completed: !todo.completed } : todo
+    );
+    await saveMailCalendarTodos();
+    renderMailCalendar();
+    return;
+  }
+  const todoDelete = event.target.closest(".mail-todo-delete");
+  if (todoDelete) {
+    if (!confirm("确认删除这条 Todo？")) return;
+    const todoId = todoDelete.dataset.todoId;
+    db.mailCalendarTodos = { ...(db.mailCalendarTodos || {}) };
+    const remaining = mailCalendarTodos(mailSelectedDateKey).filter(todo => todo.id !== todoId);
+    if (remaining.length) db.mailCalendarTodos[mailSelectedDateKey] = remaining;
+    else delete db.mailCalendarTodos[mailSelectedDateKey];
+    await saveMailCalendarTodos();
+    renderMailCalendar();
+    return;
+  }
+  const completeButton = event.target.closest(".mail-complete");
+  if (completeButton) {
+    completeButton.disabled = true;
+    try {
+      await runMailAction(mailTaskMessageIds(completeButton.dataset.messageIds), "completed");
+    } catch (error) {
+      alert(error.message || "邮件操作失败");
+    } finally {
+      completeButton.disabled = false;
+    }
+    return;
+  }
+  const deleteButton = event.target.closest(".mail-delete");
+  if (!deleteButton) return;
+  const messageIds = mailTaskMessageIds(deleteButton.dataset.messageIds);
+  const suffix = messageIds.length > 1 ? `及 ${messageIds.length - 1} 条重复提醒` : "";
+  if (!confirm(`确认删除这条邮件待办${suffix}？`)) return;
+  deleteButton.disabled = true;
   try {
-    await runMailAction(button.dataset.messageId, "completed");
+    await deleteMailTasks(messageIds);
   } catch (error) {
-    alert(error.message || "邮件操作失败");
+    alert(error.message || "删除失败");
   } finally {
-    button.disabled = false;
+    deleteButton.disabled = false;
   }
 });
 document.addEventListener("change", async event => {
   const input = event.target.closest(".mail-completed-at");
   if (!input) return;
-  const completedAt = input.value ? new Date(input.value).toISOString() : null;
+  const completedAt = input.value ? new Date(`${input.value}T12:00:00`).toISOString() : null;
+  const messageIds = input.dataset.messageIds ? mailTaskMessageIds(input.dataset.messageIds) : [input.dataset.messageId];
+  const messageIdSet = new Set(messageIds.filter(Boolean));
+  if (!messageIdSet.size) return;
   db.mailHistory = (db.mailHistory || []).map(item =>
-    item.messageId === input.dataset.messageId ? { ...item, completedAt } : item
+    messageIdSet.has(item.messageId)
+      ? { ...item, completedAt, status: completedAt ? "已完成" : item.status }
+      : item
   );
   await chrome.storage.local.set({ mailHistory: db.mailHistory });
   renderMailDashboard();
@@ -2104,10 +2238,11 @@ $("#importLocalConfig").addEventListener("click", async () => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (
     area !== "local" ||
-    (!changes.mailHistory && !changes.mailSyncStatus)
+    (!changes.mailHistory && !changes.mailSyncStatus && !changes.mailCalendarTodos)
   ) return;
   if (changes.mailHistory) db.mailHistory = changes.mailHistory.newValue || [];
   if (changes.mailSyncStatus) db.mailSyncStatus = changes.mailSyncStatus.newValue || {};
+  if (changes.mailCalendarTodos) db.mailCalendarTodos = changes.mailCalendarTodos.newValue || {};
   renderMailDashboard();
 });
 

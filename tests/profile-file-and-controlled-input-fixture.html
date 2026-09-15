@@ -94,14 +94,18 @@
   <script src="../content.js"></script>
   <script>
     document.getElementById("run").addEventListener("click", async () => {
-      const output = await window.__jianfillTest.fillCurrentFrame("full");
+      const skippedOutput = await window.__jianfillTest.fillCurrentFrame("full");
+      const resumeSkipped = document.getElementById("resume").files.length === 0 &&
+        skippedOutput.items.some(item => item.label.includes("简历附件：未确认上传，已跳过"));
+      const output = await window.__jianfillTest.fillCurrentFrame("full", { uploadResume: true });
       const result = {
         name: document.getElementById("name").value,
         identity: document.getElementById("identity").value,
         avatarName: document.getElementById("avatar").files[0]?.name || "",
         resumeName: document.getElementById("resume").files[0]?.name || "",
         identityFileCount: document.getElementById("identity-file").files.length,
-        uploadedCount: output.items.filter(item => item.status === "已上传").length
+        uploadedCount: output.items.filter(item => item.status === "已上传").length,
+        resumeSkipped
       };
       result.pass =
         result.name === "测试姓名" &&
@@ -109,7 +113,8 @@
         result.avatarName === "avatar.png" &&
         result.resumeName === "resume.pdf" &&
         result.identityFileCount === 0 &&
-        result.uploadedCount === 2;
+        result.uploadedCount === 1 &&
+        result.resumeSkipped;
       document.getElementById("result").textContent = JSON.stringify(result, null, 2);
     });
   </script>

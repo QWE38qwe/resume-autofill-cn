@@ -154,12 +154,16 @@ async function resolveCompany(tab, hostname) {
 
 $("#scan").onclick = scan;
 async function runFill(mode, button) {
+  // 简历上传可能触发招聘网站重新解析并覆盖已填内容，仅在用户明确同意后执行。
+  const uploadResume = mode === "full" && window.confirm(
+    "本次是否上传简历附件？\n\n部分招聘网站会解析简历并覆盖表单中的内容。选择“取消”将只填写其他字段。"
+  );
   const buttons = [$("#fill"), $("#supplement")];
   buttons.forEach(item => item.disabled = true);
   const original = button.querySelector("span").textContent;
   button.querySelector("span").textContent = "填写中…";
   try {
-    const result = await send("FILL_FORM", { mode });
+    const result = await send("FILL_FORM", { mode, uploadResume });
     const items = result?.items || [{ label: result?.error || "填写失败", state: "gray" }];
     show(items);
 

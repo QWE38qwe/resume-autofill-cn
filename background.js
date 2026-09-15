@@ -177,7 +177,7 @@ const COMPANY_HOST_RULES = [
 ];
 
 const COMPANY_URL_RULES = [
-  [/^https?:\/\/app\.mokahr\.com\/campus-recruitment\/sina(?:\/|$)/i, "新浪"]
+  [/^https?:\/\/app\.mokahr\.com\/(?:campus-recruitment|campus_apply)\/sina(?:[\/#?]|$)/i, "新浪"]
 ];
 
 function normalizedHostname(value) {
@@ -438,23 +438,42 @@ function mailPayload(mailSettings, settings) {
 function mergeMailHistory(existing, incoming) {
   const keyOf = item => item.taskKey || `message:${item.messageId}`;
   const merged = new Map((existing || []).map(item => [keyOf(item), item]));
+  const byMessageId = new Map((existing || []).filter(item => item.messageId).map(item => [item.messageId, item]));
   (incoming || []).forEach(item => {
-    const previous = merged.get(keyOf(item));
+    const previous = merged.get(keyOf(item)) || byMessageId.get(item.messageId);
     if (!previous) {
       merged.set(keyOf(item), item);
+      if (item.messageId) byMessageId.set(item.messageId, item);
       return;
     }
+    for (const [key, value] of merged) {
+      if (value === previous) merged.delete(key);
+    }
     const next = { ...previous, ...item };
+    const protectedTerminal = ["已完成", "已忽略", "已挂"].includes(previous.status);
+    if (item.clearTaskFields && !protectedTerminal) {
+      ["company", "companyRaw", "companySource", "companyConfidence", "needsCompanyReview", "position", "category", "deadline", "assessmentUrl", "taskKey"].forEach(key => {
+        next[key] = null;
+      });
+      next.status = "已忽略";
+    }
     ["company", "category", "deadline", "assessmentUrl", "customNote", "completedAt"].forEach(key => {
-      if (item[key] == null && previous[key] != null) next[key] = previous[key];
+      if (item[key] == null && previous[key] != null && !(item.clearTaskFields && key !== "customNote")) next[key] = previous[key];
     });
-    if (["已完成", "已忽略", "已挂"].includes(previous.status)) next.status = previous.status;
+    const canPromoteHistoricalIgnore = previous.status === "已忽略"
+      && !previous.category
+      && item.status === "待办"
+      && ["在线测评", "ai面试", "面试邀约"].includes(item.category);
+    if (protectedTerminal && !canPromoteHistoricalIgnore) {
+      next.status = previous.status;
+    }
     if (previous.companyLocked) {
       next.company = previous.company;
       next.companySource = "manual";
       next.companyLocked = true;
     }
     merged.set(keyOf(item), next);
+    if (item.messageId) byMessageId.set(item.messageId, next);
   });
   return [...merged.values()]
     .sort((left, right) => Date.parse(right.receivedAt || 0) - Date.parse(left.receivedAt || 0))

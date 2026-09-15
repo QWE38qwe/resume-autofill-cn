@@ -89,7 +89,8 @@
       <div><span>公司待修正</span><strong id="mailReviewMetric">0</strong></div>
     </div>
     <div class="mail-filters">
-      <select id="mailStatusFilter"><option value="__default__">默认（隐藏已忽略）</option><option value="">全部状态</option><option>待办</option><option>已完成</option><option>已挂</option><option>已忽略</option><option>失败</option></select>
+      <input id="mailCompanyFilter" type="search" placeholder="搜索公司名称" aria-label="搜索公司名称">
+      <select id="mailStatusFilter"><option value="__default__">默认（隐藏已忽略/待确认）</option><option value="">全部状态</option><option>待办</option><option>待确认</option><option>已完成</option><option>已挂</option><option>已忽略</option><option>失败</option></select>
       <select id="mailCategoryFilter"><option value="">全部分类</option><option>在线测评</option><option>ai面试</option><option>面试邀约</option></select>
       <select id="mailSort"><option value="received_desc">接收时间：最新优先</option><option value="received_asc">接收时间：最早优先</option><option value="deadline_asc">DDL：最早优先</option><option value="deadline_desc">DDL：最晚优先</option></select>
     </div>
@@ -109,8 +110,12 @@
       </div>
       <aside class="mail-day-panel">
         <div class="mail-day-head"><div><span class="section-kicker">当日日程</span><h3 id="mailSelectedDate"></h3></div><button class="btn ghost small" id="mailAgendaToggle" type="button">展开日程</button></div>
-        <div id="mailDayAgenda" class="mail-day-agenda"></div>
-        <label class="mail-day-note"><span>日期备注</span><textarea id="mailCalendarNote" rows="5" placeholder="记录当天安排、复盘或提醒"></textarea></label>
+        <section class="mail-day-section" aria-label="邮件待办"><div class="mail-day-section-head">邮件待办</div><div id="mailDayAgenda" class="mail-day-agenda"></div></section>
+        <section class="mail-day-section mail-day-todos" aria-label="当天 Todo">
+          <div class="mail-day-section-head">当天 Todo</div>
+          <form id="mailTodoForm" class="mail-todo-form"><input id="mailTodoInput" type="text" maxlength="160" placeholder="添加当天要做的事"><button class="btn primary small" type="submit">添加</button></form>
+          <div id="mailCalendarTodos" class="mail-calendar-todos"></div>
+        </section>
       </aside>
     </div>
   </div>
@@ -218,6 +223,22 @@
   </div>
   
   <div class="settings-group" role="presentation">数据与本地</div>
+  <div class="surface settings-card">
+    <div class="surface-head">
+      <div>
+        <h2>秋招投递表</h2>
+        <p>打开外部表格查看和维护秋招投递记录</p>
+      </div>
+    </div>
+    <div class="autumn-application-links">
+      <a class="autumn-application-link" href="https://docs.qq.com/smartsheet/DTEhaVEpHaUJzTGRh?tab=ttTHLZ&amp;viewId=vnzTVJ" target="_blank" rel="noopener noreferrer">
+        <strong>腾讯文档智能表格</strong><span>打开投递表 ↗</span>
+      </a>
+      <a class="autumn-application-link" href="https://my.feishu.cn/wiki/UdAtwwZlJiULwskzEe5cSYJZnMe?table=tbl1eASN11JYwTo8&amp;view=vewJRfkcoh" target="_blank" rel="noopener noreferrer">
+        <strong>飞书秋招投递表</strong><span>打开投递表 ↗</span>
+      </a>
+    </div>
+  </div>
 <div class="surface settings-card data-migration-card">
     <div class="surface-head"><div><h2>数据迁移</h2></div></div>
     <div class="migration-actions">

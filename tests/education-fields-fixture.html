@@ -15,6 +15,13 @@
     <div class="education-record">
       <label>学校名称<input placeholder="请输入学校名称"></label>
       <label>专业名称<input placeholder="请输入专业名称"></label>
+      <label>学习形式
+        <select>
+          <option value="">请选择</option>
+          <option value="fulltime">全国普通高等院校全日制</option>
+          <option value="parttime">全国普通高等院校非全日制</option>
+        </select>
+      </label>
       <label>专业综合排名
         <select>
           <option value="">请选择</option>
@@ -49,7 +56,8 @@
       education: [{
         school: "示例大学",
         major: "信息管理",
-        rank: "Top 10%",
+        type: "全日制",
+        rank: "排名10%之前",
         doubleDegree: "有",
         mba: "false"
       }],
@@ -84,10 +92,11 @@
         const selects = [...document.querySelectorAll("select")].map(select => select.value);
         const result = {
           response,
-          rank: selects[0],
-          doubleDegree: selects[1],
-          mba: selects[2],
-          pass: selects.join("|") === "top10|yes|no"
+          educationType: selects[0],
+          rank: selects[1],
+          doubleDegree: selects[2],
+          mba: selects[3],
+          pass: selects.join("|") === "fulltime|top10|yes|no"
         };
         document.querySelector("#result").textContent = JSON.stringify(result, null, 2);
       });

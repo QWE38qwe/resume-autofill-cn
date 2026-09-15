@@ -65,6 +65,60 @@ IGNORE_SUBJECT_CUES = (
     "就业群",
     "人才群",
 )
+# 这些邮件是系统回执或流程资料，不代表候选人需要完成测评/面试。
+# 必须在任何 AI 调用前拦截，防止正文中夹带历史内容造成误判。
+SYSTEM_RECEIPT_CUES = (
+    "定时邮件发送成功",
+    "定时邮件发送失败",
+    "邮件发送成功",
+    "邮件发送失败",
+    "发送成功通知",
+    "发送失败通知",
+    "投递成功",
+    "投递确认",
+    "已送达",
+    "已读回执",
+    "阅读回执",
+    "delivery status",
+    "delivery report",
+    "mail delivery",
+    "自动回复",
+    "auto-reply",
+    "流程说明",
+    "流程介绍",
+    "流程详情",
+    "测评流程",
+    "面试流程",
+    "操作指南",
+    "操作说明",
+    "常见问题",
+    "faq",
+)
+HARD_SYSTEM_RECEIPT_CUES = (
+    "定时邮件发送成功",
+    "定时邮件发送失败",
+    "邮件发送成功",
+    "邮件发送失败",
+    "发送成功通知",
+    "发送失败通知",
+    "已送达",
+    "已读回执",
+    "阅读回执",
+    "delivery status",
+    "delivery report",
+    "mail delivery",
+    "自动回复",
+    "auto-reply",
+    "流程说明",
+    "流程介绍",
+    "流程详情",
+    "测评流程",
+    "面试流程",
+    "操作指南",
+    "操作说明",
+    "常见问题",
+    "faq",
+ )
 URL_RE = re.compile(r"https?://[^\s<>\"]+")
 ABSOLUTE_DATE_RE = re.compile(
     r"(\d{4})\s*[年./-]\s*(\d{1,2})\s*[月./-]\s*(\d{1,2})\s*日?"
@@ -110,6 +164,8 @@ COMPANY_ALIASES = {
     "voyah": "岚图汽车",
     "岚图": "岚图汽车",
     "岚图汽车": "岚图汽车",
+    "sina": "新浪",
+    "新浪": "新浪",
     "cmb": "招商银行",
     "招商": "招商银行",
 }
@@ -152,6 +208,13 @@ def normalize_company(value: str | None) -> str | None:
 def _company(subject: str, text: str, sender: str) -> str | None:
     # 先取标题中明确的品牌，发件域名只能作为已知别名的最后兜底。
     normalized_subject = unicodedata.normalize("NFKC", subject or "")
+    normalized_source = unicodedata.normalize("NFKC", f"{subject}\n{_current_body(text)}")
+    if re.search(
+        r"app\.mokahr\.com/(?:campus-recruitment|campus_apply)/sina(?:[/#?]|$)",
+        normalized_source,
+        re.I,
+    ):
+        return "新浪"
     for alias, canonical in sorted(COMPANY_ALIASES.items(), key=lambda pair: len(pair[0]), reverse=True):
         if alias and alias.lower() in normalized_subject.lower():
             return canonical
@@ -203,38 +266,116 @@ def company_needs_review(company: str | None) -> bool:
     return normalized in COMPANY_SUSPICIOUS or len(normalized) < 2
 
 
-def classify_explicit_invitation(message: ParsedEmail) -> tuple[str | None, str]:
-    subject = message.subject.lower()
-    combined = f"{message.subject}\n{message.text}".lower()
-    subject_has_target = bool(
-        re.search(r"ai\s*(?:视频)?面试|(?:在线)?(?:测评|笔试|考试)|面试", subject, re.I)
+TARGET_PATTERNS = {
+    "ai面试": r"ai\s*(?:视频)?面试|ai视频面试|ai面试",
+    "在线测评": r"(?:在线)?(?:测评|笔试|考试)",
+    "面试邀约": r"(?:视频|电话|线上|线下|现场)?面试",
+}
+TASK_ACTION_RE = re.compile(
+    r"邀请(?:您|你)?|邀约|提醒|请(?:于|在|参加|完成)?|须|需要|务必|"
+    r"安排|到期|截止|报到|面试时间|测评链接|笔试链接|考试链接",
+    re.I,
+)
+
+
+def _current_body(value: str) -> str:
+    """从已解析正文中移除引用历史，避免旧邮件内容参与任务判定和字段抽取。"""
+    lines: list[str] = []
+    for line in (value or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith(">"):
+            continue
+        if stripped and (
+            stripped.startswith(("原邮件", "Original Message", "发件人:", "From:"))
+            or " wrote:" in stripped
+            or " 写道：" in stripped
+        ):
+            break
+        lines.append(line)
+    return chr(10).join(lines).strip()
+
+
+def _message_source(message: ParsedEmail) -> str:
+    # Subject 单独保留，正文按语义块检查，禁止跨整封邮件任意 40 个字符拼接。
+    return f"{message.subject}\n{_current_body(message.text)}".strip()
+
+
+def is_system_receipt(message: ParsedEmail) -> bool:
+    subject = unicodedata.normalize("NFKC", message.subject or "").lower()
+    headers = {str(key).lower(): str(value).lower() for key, value in (message.headers or {}).items()}
+    if any(cue in subject for cue in HARD_SYSTEM_RECEIPT_CUES):
+        return True
+    auto_submitted = headers.get("auto-submitted", "")
+    if auto_submitted in {"auto-replied", "auto-notified"}:
+        return True
+    # “投递成功/确认”等软回执只有在没有同块任务行动时才拦截，避免误伤
+    # “投递成功后请完成测评”这种确实需要候选人操作的邮件。
+    has_explicit_block = any(
+        _target_in_block(block) and TASK_ACTION_RE.search(block)
+        for block in _semantic_blocks(message)
     )
+    if headers.get("precedence", "") in {"bulk", "list", "junk"} and not has_explicit_block:
+        return True
+    if auto_submitted == "auto-generated" and not has_explicit_block:
+        return True
+    if any(cue in subject for cue in ("投递成功", "投递确认", "投递简历", "简历创建成功", "简历已创建", "简历已收到")):
+        if not has_explicit_block:
+            return True
+    return False
+
+
+def _semantic_blocks(message: ParsedEmail) -> list[str]:
+    source = _message_source(message)
+    # 先按段落切分，再按句号切分；这样引用/流程说明不会与标题跨块拼接。
+    blocks: list[str] = []
+    for paragraph in re.split(r"\n{2,}", source):
+        for sentence in re.split(r"(?<=[。！？.!?])\s+", paragraph):
+            value = sentence.strip()
+            if value:
+                blocks.append(value)
+    return blocks or [source]
+
+
+def _target_in_block(block: str) -> str | None:
+    for category, pattern in TARGET_PATTERNS.items():
+        if re.search(pattern, block, re.I):
+            return category
+    return None
+
+
+def has_task_candidate(message: ParsedEmail) -> bool:
+    if is_system_receipt(message):
+        return False
+    return any(_target_in_block(block) for block in _semantic_blocks(message))
+
+
+def classify_explicit_invitation(message: ParsedEmail) -> tuple[str | None, str]:
+    """只在同一语义块同时出现任务类型和明确行动时准入。"""
+    if is_system_receipt(message):
+        return None, "系统回执、自动回复或流程资料"
+    subject = unicodedata.normalize("NFKC", message.subject or "").lower()
+    subject_has_target = any(re.search(pattern, subject, re.I) for pattern in TARGET_PATTERNS.values())
     if any(cue in subject for cue in IGNORE_SUBJECT_CUES) and not subject_has_target:
         return None, "投递、建档或招聘宣传邮件"
-    action = r"(?:邀请(?:您|你)?|邀约|请(?:于|在|参加|完成)?|须|需要|务必|安排|到期|截止|报到)"
 
-    def explicit(target: str) -> bool:
-        return bool(
-            re.search(rf"{action}.{{0,40}}{target}", combined, re.I | re.S)
-            or re.search(rf"{target}.{{0,24}}{action}", combined, re.I | re.S)
-        )
-
-    ai_target = r"(?:ai\s*(?:视频)?面试|ai视频面试|ai面试)"
-    assessment_target = r"(?:在线)?(?:测评|笔试|考试)"
-    interview_target = r"(?:视频|电话|线上|线下|现场)?面试"
-
-    if explicit(ai_target):
-        return "ai面试", "明确 AI 面试邀约"
-    if explicit(assessment_target):
-        return "在线测评", "明确在线测评或笔试邀约"
-    if explicit(interview_target):
-        return "面试邀约", "明确面试邀约或安排"
-    return None, "未明确要求参加或完成三类邀约"
+    blocks = _semantic_blocks(message)
+    for block in blocks:
+        category = _target_in_block(block)
+        if not category:
+            continue
+        if TASK_ACTION_RE.search(block):
+            labels = {
+                "ai面试": "明确 AI 面试邀约",
+                "在线测评": "明确在线测评或笔试邀约",
+                "面试邀约": "明确面试邀约或安排",
+            }
+            return category, labels[category]
+    return None, "未在同一语义块明确要求参加或完成三类邀约"
 
 
 def classify_rejection(message: ParsedEmail) -> tuple[bool, str]:
     """判断是否为流程结束/婉拒邮件。返回 (是否结束, 命中依据)。"""
-    combined = f"{message.subject}\n{message.text}"
+    combined = _message_source(message)
     for cue in STRONG_REJECTION_CUES:
         if cue in combined:
             return True, f"命中结束信号：{cue}"
@@ -270,7 +411,7 @@ def _clean_position(value: str | None) -> str | None:
 
 
 def _position(subject: str, text: str) -> str | None:
-    combined = f"{subject}\n{text}"
+    combined = f"{subject}\n{_current_body(text)}"
     for pattern in POSITION_PATTERNS:
         match = pattern.search(combined)
         if match:
@@ -321,6 +462,8 @@ def _parse_deadline(text: str, base: datetime) -> datetime | None:
 def extract_with_rules(message: ParsedEmail) -> Extraction:
     stage, reason = classify_explicit_invitation(message)
     if not stage:
+        if is_system_receipt(message):
+            return Extraction(is_recruitment=False, confidence=99, evidence=[reason])
         is_rejection, rejection_reason = classify_rejection(message)
         if is_rejection:
             return Extraction(
@@ -334,7 +477,7 @@ def extract_with_rules(message: ParsedEmail) -> Extraction:
             )
         return Extraction(is_recruitment=False, confidence=95, evidence=[reason])
 
-    combined = f"{message.subject}\n{message.text}"
+    combined = _message_source(message)
     urls = [_clean_url(value) for value in URL_RE.findall(combined)]
     preferred = [
         url
@@ -362,15 +505,17 @@ def extract_with_rules(message: ParsedEmail) -> Extraction:
 
 SYSTEM_PROMPT = """你只抽取明确要求候选人采取行动的招聘邀约邮件。
 允许的 category 只有：在线测评、ai面试、面试邀约。
-投递成功、简历创建、验证码、招聘宣传、职位推荐、人才群邀请必须判为 explicit_action=false。
+投递成功、简历创建、验证码、招聘宣传、职位推荐、人才群邀请、定时邮件发送结果、送达/已读回执、自动回复、流程说明必须判为 explicit_action=false。
 在线笔试统一归类为在线测评。
 deadline 优先提取明确截止时间；若只有“收到邮件后 N 小时/天内”，用 received_at 计算。
+必须同时给出 action_evidence 和 target_evidence，且两者必须是邮件原文中的连续短语；无法提供时 explicit_action=false。
 只返回一个 JSON 对象，不要 Markdown。未知字段用 null，不得猜测。
 格式：
 {"explicit_action":boolean,"company":string|null,
 "category":"在线测评"|"ai面试"|"面试邀约"|null,
 "deadline":string|null,"assessment_url":string|null,
 "confidence":integer,"company_confidence":integer,
+"action_evidence":string|null,"target_evidence":string|null,
 "company_evidence":string|null,"needs_review":boolean}"""
 
 COMPANY_MATCH_PROMPT = """你负责把招聘邮件中的公司映射到给定的本地公司候选记录。
@@ -424,9 +569,9 @@ class OpenAICompatibleExtractor:
         return response
 
     def extract(self, message: ParsedEmail) -> Extraction:
-        rule_stage, _ = classify_explicit_invitation(message)
-        if not rule_stage:
-            return Extraction(is_recruitment=False, confidence=95)
+        rule_stage, rule_reason = classify_explicit_invitation(message)
+        if is_system_receipt(message):
+            return Extraction(is_recruitment=False, confidence=99, evidence=[rule_reason])
 
         body = {
             "temperature": 0,
@@ -437,7 +582,7 @@ class OpenAICompatibleExtractor:
                     "content": (
                         f"received_at: {message.received_at.isoformat()}\n"
                         f"from: {message.sender}\nsubject: {message.subject}\n\n"
-                        f"{message.text[:24000]}"
+                        f"{_current_body(message.text)[:24000]}"
                     ),
                 },
             ],
@@ -467,18 +612,29 @@ class OpenAICompatibleExtractor:
         company = _clean_company(data.get("company"))
         company_confidence = max(0, min(100, int(data.get("company_confidence", data.get("confidence", 0)))))
         company_evidence = str(data.get("company_evidence") or "").strip()
-        source_text = f"{message.subject}\n{message.text}\n{message.sender}".lower()
-        if company and (company_confidence < 80 or (company_evidence and company_evidence.lower() not in source_text)):
+        source_text = f"{message.subject}\n{_current_body(message.text)}\n{message.sender}"
+        source_text_lower = source_text.lower()
+        action_evidence = str(data.get("action_evidence") or "").strip()
+        target_evidence = str(data.get("target_evidence") or "").strip()
+        evidence_valid = bool(
+            action_evidence
+            and target_evidence
+            and action_evidence.lower() in source_text_lower
+            and target_evidence.lower() in source_text_lower
+        )
+        explicit_action = bool(data.get("explicit_action")) and category in CATEGORIES and evidence_valid
+        if company and (company_confidence < 80 or (company_evidence and company_evidence.lower() not in source_text_lower)):
             company = None
         return Extraction(
-            is_recruitment=bool(data.get("explicit_action")) and category in CATEGORIES,
+            is_recruitment=explicit_action,
             company=company,
             position=_position(message.subject, message.text),
             stage=category,
             deadline=deadline,
             assessment_url=data.get("assessment_url") or None,
             confidence=max(0, min(100, int(data.get("confidence", 0)))),
-            needs_review=bool(data.get("needs_review")),
+            needs_review=bool(data.get("needs_review")) or (bool(data.get("explicit_action")) and not evidence_valid),
+            evidence=[rule_reason, action_evidence, target_evidence] if explicit_action else ["AI未提供可验证的任务行动证据"],
             company_source="ai" if company else None,
             company_confidence=company_confidence if company else 0,
         )

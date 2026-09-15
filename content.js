@@ -1558,8 +1558,8 @@ async function fillBeisenPhoenixDateRange(block, record, overwrite, used) {
     else failed += 1;
   };
 
-  await fillOne(startControl, record.start, "start");
   await fillOne(endControl, record.end, "end");
+  await fillOne(startControl, record.start, "start");
   return { handled: true, filled, failed };
 }
 
@@ -1658,7 +1658,8 @@ async function fillAtsxPeriodMonthRange(block, record, overwrite, used) {
   const targets = [record.start, record.end];
   let filled = 0;
   let failed = 0;
-  for (let index = 0; index < labels.length; index += 1) {
+  // 部分网站会在开始日期为空时拒绝较早的结束日期，因此先写结束日期。
+  for (const index of [1, 0]) {
     const existing = normalizeText(labels[index].textContent);
     if (!overwrite && /\d{4}/.test(existing)) continue;
     if (!targets[index]) {
@@ -1688,7 +1689,7 @@ async function fillThroneDateRange(block, record, overwrite, used) {
   });
   let filled = 0;
   let failed = 0;
-  for (let index = 0; index < inputs.length; index += 1) {
+  for (const index of [1, 0]) {
     const input = inputs[index];
     const target = values[index];
     if (!target) {
@@ -1873,12 +1874,6 @@ async function fillBilibiliDateRange(block, record, overwrite, used) {
 
   let filled = 0;
   let failed = 0;
-  const start = inputs[0];
-  if (record.start && start && (overwrite || isBlankControl(start))) {
-    if (await chooseAntMonth(start, record.start)) filled += 1;
-    else failed += 1;
-  }
-
   if (wantsPresent) {
     if (currentControl && !checkboxIsChecked(currentControl)) {
       clickElement(currentControl);
@@ -1894,6 +1889,11 @@ async function fillBilibiliDateRange(block, record, overwrite, used) {
     else failed += 1;
   } else if (record.end && !end) {
     failed += 1;
+  }
+  const start = inputs[0];
+  if (record.start && start && (overwrite || isBlankControl(start))) {
+    if (await chooseAntMonth(start, record.start)) filled += 1;
+    else failed += 1;
   }
   return { handled: true, filled, failed };
 }
@@ -1983,10 +1983,26 @@ function percentileRankValue(value) {
     "";
 }
 
+function optionSemanticValue(value) {
+  const source = normalizeText(String(value || "").replace(/％/g, "%"));
+  if (!source) return "";
+  if (/非全日制|非脱产|业余|函授/.test(source)) return "education:part-time";
+  if (/全日制|统招|普通高等院校/.test(source)) return "education:full-time";
+
+  const rank = source.match(/(?:前|top|排名|成绩排名|专业排名|班级排名|年级排名|学业排名)\s*(\d{1,2})\s*(?:%|percent|百分之)?(?:之前|以内|及以内|含)?/i) ||
+    source.match(/(\d{1,2})\s*(?:%|percent|百分之)\s*(?:之前|以内|及以内|含)/i);
+  return rank ? `rank:top:${rank[1]}` : "";
+}
+
 function optionScore(text, value) {
   const option = normalizeText(text);
   const wanted = normalizeText(value);
   if (!option || !wanted) return 0;
+  const optionSemantic = optionSemanticValue(text);
+  const wantedSemantic = optionSemanticValue(value);
+  if (optionSemantic || wantedSemantic) {
+    return optionSemantic && optionSemantic === wantedSemantic ? 98 : 0;
+  }
   const wantedPercentile = percentileRankValue(value);
   const optionPercentile = percentileRankValue(text);
   if (wantedPercentile || optionPercentile) {
@@ -2842,10 +2858,10 @@ async function fillYearMonthParts(block, record, overwrite, used) {
   const start = splitDate(record.start);
   const end = splitDate(record.end);
   const assignments = [
-    [years[0], start.year],
-    [months[0], start.month],
     [years[1], end.year],
-    [months[1], end.month]
+    [months[1], end.month],
+    [years[0], start.year],
+    [months[0], start.month]
   ];
   let filled = 0;
   let failed = 0;
@@ -2880,15 +2896,15 @@ async function fillDateRange(block, record, overwrite, used) {
   const endUsed = new Set(used);
   if (startControl) endUsed.add(startControl);
   const endControl = findControlByAliases(block, endAliases, endUsed, "end");
-  if (startControl && record.start) {
-    const value = dateValueForBoundary(record.start, "start", startControl);
-    if (await fillControl(startControl, value, overwrite) === "filled") filled += 1;
-    used.add(startControl);
-  }
   if (endControl && record.end) {
     const value = dateValueForBoundary(record.end, "end", endControl);
     if (await fillControl(endControl, value, overwrite) === "filled") filled += 1;
     used.add(endControl);
+  }
+  if (startControl && record.start) {
+    const value = dateValueForBoundary(record.start, "start", startControl);
+    if (await fillControl(startControl, value, overwrite) === "filled") filled += 1;
+    used.add(startControl);
   }
   if (startControl || endControl) return filled;
 
@@ -2897,15 +2913,15 @@ async function fillDateRange(block, record, overwrite, used) {
     const text = normalizeText(`${control.type} ${control.placeholder || ""} ${labelOf(control)} ${nearbyTextOf(control, block)}`);
     return /date|month|时间|日期|年月/.test(text);
   });
-  if (genericDates[0] && record.start) {
-    const value = dateValueForBoundary(record.start, "start", genericDates[0]);
-    if (await fillControl(genericDates[0], value, overwrite) === "filled") filled += 1;
-    used.add(genericDates[0]);
-  }
   if (genericDates[1] && record.end) {
     const value = dateValueForBoundary(record.end, "end", genericDates[1]);
     if (await fillControl(genericDates[1], value, overwrite) === "filled") filled += 1;
     used.add(genericDates[1]);
+  }
+  if (genericDates[0] && record.start) {
+    const value = dateValueForBoundary(record.start, "start", genericDates[0]);
+    if (await fillControl(genericDates[0], value, overwrite) === "filled") filled += 1;
+    used.add(genericDates[0]);
   }
   return filled;
 }
@@ -3209,6 +3225,10 @@ async function fillBaseFields(data, customFields, settings, handled, targets, ai
       }
     }
     if (!match) continue;
+    if (match.key === "resumeAttachment" && !settings.uploadResume) {
+      items.push({ label: `${match.label}：未确认上传，已跳过`, state: "gray", status: "跳过" });
+      continue;
+    }
     if (singleValueKeys.has(match.key) && claimedSingleValueKeys.has(match.key)) continue;
     if (singleValueKeys.has(match.key)) claimedSingleValueKeys.add(match.key);
     handled.add(element);
@@ -3301,7 +3321,7 @@ async function scanForm() {
   return mergeScanResults(current, frameResults);
 }
 
-async function fillCurrentFrame(mode = "supplement") {
+async function fillCurrentFrame(mode = "supplement", options = {}) {
   const store = await chrome.storage.local.get([
     "personal", "education", "projects", "languages", "skills", "awards", "papers", "certificates", "portfolio",
     "profiles", "activeProfileId", "settings", "customFields"
@@ -3309,7 +3329,12 @@ async function fillCurrentFrame(mode = "supplement") {
   const profile = (store.profiles || []).find(item => item.id === store.activeProfileId) || store.profiles?.[0];
   const data = flattened(store.personal || {}, store.education || [], profile, store.skills || [], store.languages || []);
   const overwrite = mode === "full";
-  const settings = { ...(store.settings || {}), overwrite };
+  const settings = {
+    ...(store.settings || {}),
+    overwrite,
+    // 补充填写永不上传简历；一键填写也必须来自弹窗的显式确认。
+    uploadResume: mode === "full" && options.uploadResume === true
+  };
   const repeated = await fillRepeatedSections(store, profile, overwrite);
   const targets = fieldTargets().filter(element => !repeated.handled.has(element));
   const aiResult = await requestAiMappings(targets, data, store.customFields || [], settings);
@@ -3327,9 +3352,9 @@ async function fillCurrentFrame(mode = "supplement") {
   return { items, profile: profile?.name, mode };
 }
 
-async function fillForm(mode = "supplement") {
-  const current = await fillCurrentFrame(mode);
-  const frameResults = await requestFrameResults("FILL_FORM", { mode });
+async function fillForm(mode = "supplement", options = {}) {
+  const current = await fillCurrentFrame(mode, options);
+  const frameResults = await requestFrameResults("FILL_FORM", { mode, options });
   const frameItems = frameResults.flatMap(result => result.items || []);
   if (!frameItems.length) return current;
   const currentItems = current.items.filter(item => !/未识别到可填写字段/.test(item.label || ""));
@@ -3346,7 +3371,7 @@ window.addEventListener("message", event => {
   (async () => {
     const result = data.type === "SCAN_FORM"
       ? await scanCurrentFrame()
-      : await fillCurrentFrame(data.payload?.mode);
+      : await fillCurrentFrame(data.payload?.mode, data.payload?.options);
     event.source?.postMessage({ source: "jianfill-frame-result", id: data.id, result }, "*");
   })().catch(error => {
     event.source?.postMessage({
@@ -3360,7 +3385,7 @@ window.addEventListener("message", event => {
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   (async () => {
     if (message.type === "SCAN_FORM") reply(await scanForm());
-    if (message.type === "FILL_FORM") reply(await fillForm(message.mode));
+    if (message.type === "FILL_FORM") reply(await fillForm(message.mode, { uploadResume: message.uploadResume }));
   })().catch(error => {
     console.error("[简填]", error);
     reply({ error: error.message || "页面适配失败" });

@@ -9,7 +9,15 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .config import Settings
-from .extractors import REJECTION_STAGE, OpenAICompatibleExtractor, company_needs_review, extract_with_rules
+from .extractors import (
+    CATEGORIES,
+    REJECTION_STAGE,
+    OpenAICompatibleExtractor,
+    company_needs_review,
+    extract_with_rules,
+    has_task_candidate,
+    is_system_receipt,
+)
 from .models import Extraction, ParsedEmail
 from .state import StateStore
 
@@ -81,6 +89,7 @@ def detail_for(message: ParsedEmail, status: str, result: Extraction | None = No
         "status": status,
         "reason": reason or (result.evidence[0] if result and result.evidence else ""),
         "completedAt": None,
+        "clearTaskFields": bool(result is not None and not result.is_recruitment),
     }
 
 
@@ -137,10 +146,25 @@ class SyncService:
     def _extract(self, message: ParsedEmail) -> Extraction:
         result = extract_with_rules(message)
         if not result.is_recruitment:
-            return result
+            # 系统回执和没有任务目标的邮件永不进入 AI，避免把正文里的历史内容重新解释成任务。
+            if is_system_receipt(message) or not has_task_candidate(message):
+                return result
+            # 规则无法确定但存在测评/面试目标时，才交给 AI 做二次准入。
+            try:
+                ai_result = self.llm.extract(message)
+                if not ai_result.is_recruitment:
+                    return Extraction(is_recruitment=False, confidence=ai_result.confidence, evidence=ai_result.evidence or result.evidence)
+                if ai_result.confidence < 85 or ai_result.needs_review:
+                    ai_result.is_recruitment = True
+                    ai_result.needs_review = True
+                return ai_result
+            except Exception:
+                logger.exception("LLM admission failed for %s; keeping it out of tasks", message.message_id)
+                return Extraction(is_recruitment=False, confidence=0, evidence=["AI 准入失败，未加入任务"])
         if not result.company or company_needs_review(result.company) or not result.deadline or not result.assessment_url:
             try:
                 ai_result = self.llm.extract(message)
+                # 明确任务已经由规则准入；这里 AI 只补字段，不能把任务改成非任务。
                 if ai_result.company and (not result.company or company_needs_review(result.company)):
                     result.company = ai_result.company
                     result.company_source = "ai"
@@ -166,15 +190,26 @@ class SyncService:
                 _, result = deserialize_mail_action(saved["snapshot_json"])
             except (KeyError, TypeError, ValueError, json.JSONDecodeError):
                 logger.warning("Invalid local mail snapshot for %s", message.message_id)
-        if result and (not result.company or company_needs_review(result.company)):
+        # 旧版本可能把系统回执存成 updated；每次仍在 lookback 内的机器记录都重新走准入，
+        # 这样新规则可以自动回收历史误判。前端手工终态由 background.js 合并时保护。
+        should_refresh = True
+        if should_refresh:
             try:
                 refreshed = self._extract(message)
-                if refreshed.company or refreshed.stage:
-                    result = refreshed
-                    self._save_action(message, result)
+                result = refreshed
+                self._save_action(message, result)
+                if refreshed.stage in CATEGORIES and refreshed.is_recruitment:
+                    outcome = "needs_review" if refreshed.needs_review else "updated"
+                    self.state.mark_processed(message.message_id, message.uid, outcome)
+                elif refreshed.stage == REJECTION_STAGE and refreshed.is_recruitment:
+                    outcome = "hung"
+                    self.state.mark_processed(message.message_id, message.uid, outcome)
+                else:
+                    outcome = "irrelevant"
+                    self.state.mark_processed(message.message_id, message.uid, outcome)
             except Exception:
                 logger.exception("Historical company refresh failed for %s", message.message_id)
-        status = {"irrelevant": "已忽略", "completed": "已完成", "hung": "已挂"}.get(outcome, "待办")
+        status = {"irrelevant": "已忽略", "completed": "已完成", "hung": "已挂", "needs_review": "待确认"}.get(outcome, "待办")
         return detail_for(message, status, result, "本地去重记录已存在，本次同步已跳过")
 
     def run_once(self) -> SyncSummary:
@@ -200,7 +235,7 @@ class SyncService:
                 summary.new_tasks += 1
                 if result.needs_review:
                     summary.needs_company_review += 1
-                status = "已挂" if result.stage == REJECTION_STAGE else "待办"
+                status = "已挂" if result.stage == REJECTION_STAGE else ("待确认" if result.needs_review else "待办")
                 summary.details.append(detail_for(message, status, result, "公司待确认" if result.needs_review else "已加入本地任务"))
             except Exception as error:
                 logger.exception("Failed to process %s", message.message_id)
