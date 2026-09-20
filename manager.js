@@ -170,6 +170,7 @@ let mailNoteTimer = null;
 let mailCalendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 let mailSelectedDateKey = localDateKey(new Date());
 let mailAgendaExpanded = false;
+let mailColumnResize = null;
 
 function activateTab(tab) {
   $$("#nav button").forEach(button => button.classList.toggle("active", button.dataset.tab === tab));
@@ -254,6 +255,7 @@ async function init() {
   $("#hobbiesText").value = db.hobbies || "";
   const settings = db.settings || {};
   settings.aiProviders = normalizeAiProviders(settings);
+  settings.aiOptionMatching = settings.aiOptionMatching === true;
   settings.apiConfigured = isAiConfigured(settings);
   db.settings = settings;
   await chrome.storage.local.set({ settings });
@@ -264,6 +266,14 @@ async function init() {
   }
   renderAiProviders();
   renderAiRules();
+  const aiOptionMatching = $("#aiOptionMatching");
+  if (aiOptionMatching) {
+    aiOptionMatching.checked = settings.aiOptionMatching;
+    aiOptionMatching.onchange = async () => {
+      db.settings.aiOptionMatching = aiOptionMatching.checked;
+      await persistAiSettings();
+    };
+  }
   refreshHistoryCompanyNames().catch(() => {});
 
   const requestedTab = location.hash.replace(/^#/, "");
@@ -1005,18 +1015,21 @@ $("#saveHobbies").addEventListener("click", async () => {
 });
 
 function isGeneratedCompanyName(value) {
-  const company = String(value || "").trim();
-  if (!company) return true;
-  if (/^(OPPO|vivo|DJI|BCG|BMW|TCL)$/i.test(company)) return false;
-  return !/[\u3400-\u9fff]/.test(company);
+  return JianfillHistoryCompany.isGeneratedCompanyName(value);
 }
 
 function historyCompanyName(record) {
-  return isGeneratedCompanyName(record.company) ? "公司待确认" : String(record.company).trim();
+  if (globalThis.JianfillHistoryCompany) return JianfillHistoryCompany.historyCompanyName(record);
+  return record?.companyLocked && String(record.company || "").trim()
+    ? String(record.company).trim()
+    : (isGeneratedCompanyName(record.company) ? "公司待确认" : String(record.company).trim());
 }
 
 function historyCompanyKey(record) {
-  const company = isGeneratedCompanyName(record.company) ? "" : record.company;
+  if (globalThis.JianfillHistoryCompany) return JianfillHistoryCompany.historyCompanyKey(record);
+  const company = record?.companyLocked && String(record.company || "").trim()
+    ? record.company
+    : (isGeneratedCompanyName(record.company) ? "" : record.company);
   return String(company || record.site || "").trim().toLocaleLowerCase("zh-CN");
 }
 
@@ -1053,9 +1066,9 @@ async function upsertHistory(record) {
 async function refreshHistoryCompanyNames() {
   const pending = db.fillHistory
     .map((record, index) => ({ record, index }))
-    .filter(({ record }) => isGeneratedCompanyName(record.company))
+    .filter(({ record }) => !record.companyLocked && isGeneratedCompanyName(record.company))
     .map(({ record, index }) => ({
-      id: String(index),
+      id: String(index), recordRef: record,
       hostname: record.site || record.url || "",
       url: record.url || "",
       title: record.pageTitle || ""
@@ -1063,13 +1076,14 @@ async function refreshHistoryCompanyNames() {
   if (!pending.length) return;
   const result = await chrome.runtime.sendMessage({
     type: "RESOLVE_COMPANIES",
-    records: pending
+    records: pending.map(({ recordRef, ...record }) => record)
   });
   if (!result?.ok) return;
   let changed = false;
   (result.resolutions || []).forEach(item => {
-    const index = Number(item.id);
-    if (!Number.isInteger(index) || !db.fillHistory[index] || !item.company) return;
+    const original = pending.find(record => record.id === String(item.id))?.recordRef;
+    const index = original ? db.fillHistory.indexOf(original) : -1;
+    if (index < 0 || !db.fillHistory[index] || db.fillHistory[index].companyLocked || !item.company) return;
     db.fillHistory[index].company = item.company;
     changed = true;
   });
@@ -1235,16 +1249,14 @@ function bindHistory() {
   $$("[data-company]").forEach(input => {
     const index = Number(input.dataset.company);
     const original = historyCompanyName(db.fillHistory[index]);
-    input.onkeydown = event => {
-      if (event.key === "Enter") input.blur();
-      if (event.key === "Escape") {
+    const commit = async value => {
+      if (String(value || "").trim() === String(original || "").trim()) return;
+      if (!await saveHistoryCompany(index, value, { rerender: true })) {
         input.value = original;
-        input.blur();
+        toast("公司名不能为空，未保存", "error");
       }
     };
-    input.onchange = async () => {
-      if (!await saveHistoryCompany(index, input.value, { rerender: true })) input.value = original;
-    };
+    JianfillHistoryCompany.bind(input, original, commit);
   });
   $$("[data-note]").forEach(input => {
     input.onchange = async () => {
@@ -1616,11 +1628,70 @@ function updateBridgeState(state, text) {
   node.innerHTML = `<i></i>${safe(text)}`;
 }
 
+const MAIL_BOARD_COLUMNS = [
+  ["status", "状态", 74, 64], ["company", "公司", 126, 96], ["subject", "邮件标题", 190, 120],
+  ["category", "分类", 96, 76], ["deadline", "DDL", 150, 110], ["receivedAt", "接收时间", 126, 108],
+  ["completedAt", "完成日期", 126, 108], ["note", "自定义备注", 180, 140], ["actions", "操作", 230, 190]
+];
+const MAIL_BOARD_COLUMN_KEYS = new Set(MAIL_BOARD_COLUMNS.map(([key]) => key));
+
+function normalizeMailBoardColumnWidths(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return Object.fromEntries(MAIL_BOARD_COLUMNS.map(([key, , fallback, min]) => {
+    const number = Number(source[key]);
+    return [key, Number.isFinite(number) ? Math.max(min, Math.min(640, Math.round(number))) : fallback];
+  }));
+}
+
+function mailBoardTableWidth(widths) {
+  return MAIL_BOARD_COLUMNS.reduce((sum, [key]) => sum + Number(widths[key] || 0), 0);
+}
+
 function mailStatusClass(status) {
-  if (status === "待办" || status === "已完成") return "matched";
-  if (status === "已挂") return "hung";
-  if (status === "失败") return "danger";
-  return "skipped";
+  return ({
+    "待办": "status-todo",
+    "已完成": "status-completed",
+    "待确认": "status-review",
+    "已挂": "status-hung",
+    "已忽略": "status-skipped",
+    "失败": "status-failed"
+  })[status] || "status-unknown";
+}
+
+function updateMailCompanyRecords(history, aliases, messageIds, value) {
+  const ids = new Set((Array.isArray(messageIds) ? messageIds : [messageIds]).filter(Boolean).map(String));
+  const company = String(value || "").trim();
+  const nextAliases = { ...(aliases && typeof aliases === "object" ? aliases : {}) };
+  const nextHistory = (history || []).map(item => {
+    if (!ids.has(String(item.messageId))) return item;
+    const raw = String(item.companyRaw || "").trim();
+    if (company && raw) nextAliases[raw] = company;
+    return {
+      ...item,
+      company: company || null,
+      companyLocked: Boolean(company),
+      companySource: company ? "manual" : "",
+      needsCompanyReview: !company
+    };
+  });
+  return { history: nextHistory, aliases: nextAliases };
+}
+
+async function saveMailCompany(messageIds, value, { rerender = true } = {}) {
+  const previousHistory = db.mailHistory || [];
+  const previousAliases = db.mailCompanyAliases || {};
+  const result = updateMailCompanyRecords(previousHistory, previousAliases, messageIds, value);
+  db.mailHistory = result.history;
+  db.mailCompanyAliases = result.aliases;
+  try {
+    await chrome.storage.local.set({ mailHistory: db.mailHistory, mailCompanyAliases: db.mailCompanyAliases });
+    if (rerender) renderMailDashboard();
+    return result;
+  } catch (error) {
+    db.mailHistory = previousHistory;
+    db.mailCompanyAliases = previousAliases;
+    throw error;
+  }
 }
 
 function formatMailTime(value) {
@@ -1636,9 +1707,9 @@ function formatMailTime(value) {
 }
 
 async function saveHistoryCompany(index, value, { rerender = false } = {}) {
-  const company = String(value || "").trim();
-  if (!company || !db.fillHistory[index]) return false;
-  db.fillHistory[index].company = company;
+  const updated = JianfillHistoryCompany?.manual(db.fillHistory[index], value);
+  if (!updated) return false;
+  db.fillHistory[index] = updated;
   db.fillHistory = dedupeLatestHistory(db.fillHistory);
   await chrome.storage.local.set({ fillHistory: db.fillHistory });
   if (rerender) {
@@ -1692,6 +1763,7 @@ function localDateValue(value) {
 
 function mailTaskDate(item) {
   if (item.status === "已完成" && item.completedAt) return parseMailDate(item.completedAt);
+  if (item.scheduleState === "awaiting_time") return null;
   return parseMailDate(item.deadline);
 }
 
@@ -1805,21 +1877,20 @@ function renderMailDayAgenda(events = mailCalendarEvents()) {
     const completed = item.status === "已完成";
     const completedDate = localDateValue(item.completedAt);
     return `
-      <article class="mail-agenda-item ${completed ? "is-completed" : ""}">
+      <article class="mail-agenda-item ${mailStatusClass(item.status)}">
         <div class="mail-agenda-copy">
           <div class="mail-agenda-title">
-            <span class="mail-agenda-status" aria-label="${completed ? "已完成" : "未完成"}">${completed ? "●" : "○"}</span>
-            <strong>${safe(item.company || "无法确定公司")}</strong>
+            <span class="mail-agenda-status" aria-label="${safeAttr(item.status || "未知")}">${completed ? "●" : "○"}</span>
+            <input class="mail-agenda-company-input" data-message-ids="${taskIds}" value="${safeAttr(item.company || "")}" placeholder="无法确定公司" aria-label="编辑公司名称">
             <span class="mail-agenda-separator">·</span>
             <span class="mail-category">${safe(item.category || "待办")}</span>
           </div>
-          <p>DDL ${item.deadline ? safe(formatMailTime(item.deadline)) : "—"}</p>
+          <p>${item.scheduleState === "awaiting_time" ? "已识别为面试，等待补充时间" : `DDL ${item.deadline ? safe(formatMailTime(item.deadline)) : "—"}`}</p>
           <div class="mail-completed-date">
             <span>完成日期</span>
-            <span class="mail-completed-value">${safe(completedDate || "—")}</span>
             ${completed
               ? `<input class="mail-completed-at" data-message-ids="${taskIds}" type="date" value="${safeAttr(completedDate)}" aria-label="修改完成日期">`
-              : ""}
+              : `<span class="mail-completed-value">—</span>`}
           </div>
         </div>
         <div class="mail-agenda-actions">
@@ -1888,10 +1959,12 @@ function renderMailDashboard() {
     renderMailView();
     return;
   }
+  const columnWidths = normalizeMailBoardColumnWidths(db.mailBoardColumnWidths);
   $("#mailHistoryTable").innerHTML = `
     <div class="mail-table-wrap">
-      <table class="mail-table">
-        <thead><tr><th>状态</th><th>公司</th><th>邮件标题</th><th>分类</th><th>DDL</th><th>接收时间</th><th>完成日期</th><th>自定义备注</th><th>操作</th></tr></thead>
+      <table class="mail-table" style="width:${mailBoardTableWidth(columnWidths)}px">
+        <colgroup>${MAIL_BOARD_COLUMNS.map(([key, , , min]) => `<col data-column-key="${key}" style="width:${columnWidths[key]}px;min-width:${min}px">`).join("")}</colgroup>
+        <thead><tr>${MAIL_BOARD_COLUMNS.map(([key, label]) => `<th data-column-key="${key}"><span class="mail-table-heading">${label}</span><span class="mail-col-resizer" data-column-key="${key}" role="separator" aria-label="调整${label}列宽" tabindex="0"></span></th>`).join("")}</tr></thead>
         <tbody>
           ${rows.map(item => {
             const link = httpUrl(item.assessmentUrl);
@@ -1901,7 +1974,9 @@ function renderMailDashboard() {
                 <td><input class="mail-company-input" data-message-id="${safeAttr(item.messageId)}" value="${safeAttr(item.company || "")}" placeholder="${safeAttr(item.reason || "编辑公司")}" aria-label="公司名称"></td>
                 <td><div class="mail-subject" title="${safeAttr(item.subject || "")}">${safe(item.subject || "无主题")}</div></td>
                 <td>${item.category ? `<span class="mail-category">${safe(item.category)}</span>` : '<span class="cell-empty">—</span>'}</td>
-                <td>${item.deadline ? `<time>${safe(item.deadline)}</time>` : '<span class="cell-empty">—</span>'}</td>
+                <td>${item.scheduleState === "awaiting_time"
+                  ? '<span class="cell-empty">已识别为面试，等待补充时间</span>'
+                  : item.deadline ? `<time>${safe(item.deadline)}</time>` : '<span class="cell-empty">—</span>'}</td>
                 <td><time>${safe(formatMailTime(item.receivedAt))}</time></td>
                 <td>${item.status === "已完成"
                   ? `<input class="mail-completed-at" data-message-id="${safeAttr(item.messageId)}" type="date" value="${safeAttr(localDateValue(item.completedAt))}" aria-label="修改完成日期">`
@@ -1928,6 +2003,54 @@ async function refreshMailState() {
   db.mailHistory = state.mailHistory || [];
   db.mailSyncStatus = state.mailSyncStatus || {};
   renderMailDashboard();
+}
+
+function mailResizeColumnElement(table, key) {
+  return table?.querySelector(`col[data-column-key="${CSS.escape(key)}"]`);
+}
+
+function startMailColumnResize(event) {
+  const handle = event.target.closest(".mail-col-resizer");
+  if (!handle) return;
+  const table = handle.closest("table");
+  const key = handle.dataset.columnKey;
+  const col = mailResizeColumnElement(table, key);
+  if (!table || !col || !MAIL_BOARD_COLUMN_KEYS.has(key)) return;
+  event.preventDefault();
+  mailColumnResize = {
+    table,
+    key,
+    startX: event.clientX,
+    startWidth: parseFloat(col.style.width) || col.getBoundingClientRect().width,
+    minWidth: MAIL_BOARD_COLUMNS.find(item => item[0] === key)?.[3] || 64
+  };
+  document.body.classList.add("is-mail-resizing");
+  window.addEventListener("pointermove", resizeMailColumn);
+  window.addEventListener("pointerup", finishMailColumnResize, { once: true });
+}
+
+function resizeMailColumn(event) {
+  if (!mailColumnResize) return;
+  const next = Math.max(mailColumnResize.minWidth, Math.min(640, mailColumnResize.startWidth + event.clientX - mailColumnResize.startX));
+  const col = mailResizeColumnElement(mailColumnResize.table, mailColumnResize.key);
+  if (!col) return;
+  col.style.width = `${Math.round(next)}px`;
+  mailColumnResize.table.style.width = `${mailBoardTableWidth(Object.fromEntries([...mailColumnResize.table.querySelectorAll("col[data-column-key]")].map(item => [item.dataset.columnKey, parseFloat(item.style.width) || 0])))}px`;
+}
+
+async function finishMailColumnResize() {
+  if (!mailColumnResize) return;
+  const { table } = mailColumnResize;
+  const widths = normalizeMailBoardColumnWidths(Object.fromEntries([...table.querySelectorAll("col[data-column-key]")].map(item => [item.dataset.columnKey, parseFloat(item.style.width)])));
+  db.mailBoardColumnWidths = widths;
+  mailColumnResize = null;
+  document.body.classList.remove("is-mail-resizing");
+  window.removeEventListener("pointermove", resizeMailColumn);
+  try {
+    await chrome.storage.local.set({ mailBoardColumnWidths: widths });
+  } catch (error) {
+    toast("看板列宽保存失败", "error");
+  }
 }
 
 $("#saveMailSettings").addEventListener("click", async () => {
@@ -2100,28 +2223,56 @@ async function deleteMailTasks(messageIds) {
   toast("邮件待办已删除", "success");
 }
 
-$("#mailHistoryTable").addEventListener("change", async event => {
-  const input = event.target.closest(".mail-company-input");
-  if (!input) return;
+async function commitMailCompanyInput(input) {
+  if (!input || input.dataset.skipCommit === "1") return;
   const value = input.value.trim();
-  const messageId = input.dataset.messageId;
-  db.mailHistory = (db.mailHistory || []).map(item => item.messageId === messageId
-    ? { ...item, company: value || null, companyLocked: Boolean(value), companySource: value ? "manual" : "", needsCompanyReview: !value }
-    : item);
-  const current = db.mailHistory.find(item => item.messageId === messageId);
-  db.mailCompanyAliases = { ...(db.mailCompanyAliases || {}) };
-  if (value && current?.companyRaw) db.mailCompanyAliases[String(current.companyRaw).trim()] = value;
-  await chrome.storage.local.set({ mailHistory: db.mailHistory, mailCompanyAliases: db.mailCompanyAliases });
-  renderMailDashboard();
-  toast(value ? "公司名称已修正并记忆" : "已清除公司名称", "success");
-});
-$("#mailHistoryTable").addEventListener("keydown", event => {
-  const input = event.target.closest(".mail-company-input");
-  if (input && event.key === "Enter") {
+  if (input.dataset.committedValue === value) return;
+  const previous = input.dataset.originalValue ?? input.defaultValue ?? "";
+  input.dataset.committedValue = value;
+  try {
+    await saveMailCompany(input.dataset.messageId || mailTaskMessageIds(input.dataset.messageIds), value);
+    toast(value ? "公司名称已修正并记忆" : "已清除公司名称", "success");
+  } catch (error) {
+    input.value = previous;
+    input.dataset.committedValue = previous;
+    toast(error.message || "公司名称保存失败", "error");
+  }
+}
+
+function handleMailCompanyFocus(event) {
+  const input = event.target.closest(".mail-company-input, .mail-agenda-company-input");
+  if (!input) return;
+  input.dataset.originalValue = input.value;
+  input.dataset.committedValue = input.value;
+}
+
+function handleMailCompanyFocusOut(event) {
+  const input = event.target.closest(".mail-company-input, .mail-agenda-company-input");
+  if (input) commitMailCompanyInput(input);
+}
+
+function handleMailCompanyKeydown(event) {
+  const input = event.target.closest(".mail-company-input, .mail-agenda-company-input");
+  if (!input) return;
+  if (event.key === "Enter") {
     event.preventDefault();
     input.blur();
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    input.value = input.dataset.originalValue ?? input.defaultValue ?? "";
+    input.dataset.skipCommit = "1";
+    input.blur();
+    queueMicrotask(() => delete input.dataset.skipCommit);
   }
-});
+}
+
+$("#mailHistoryTable").addEventListener("focusin", handleMailCompanyFocus);
+$("#mailHistoryTable").addEventListener("focusout", handleMailCompanyFocusOut);
+$("#mailHistoryTable").addEventListener("keydown", handleMailCompanyKeydown);
+$("#mailCalendarView").addEventListener("focusin", handleMailCompanyFocus);
+$("#mailCalendarView").addEventListener("focusout", handleMailCompanyFocusOut);
+$("#mailCalendarView").addEventListener("keydown", handleMailCompanyKeydown);
+$("#mailHistoryTable").addEventListener("pointerdown", startMailColumnResize);
 $("#mailHistoryTable").addEventListener("change", async event => {
   const select = event.target.closest(".mail-action");
   if (!select?.value) return;
@@ -3220,7 +3371,8 @@ async function persistAiSettings() {
     apiConfigured: providers.some(provider =>
       provider.enabled && provider.apiBase && provider.model && provider.apiKey
     ),
-    aiRules: db.settings?.aiRules || defaultAiRules.map(rule => ({ ...rule }))
+    aiRules: db.settings?.aiRules || defaultAiRules.map(rule => ({ ...rule })),
+    aiOptionMatching: db.settings?.aiOptionMatching === true
   };
   await chrome.storage.local.set({ settings: db.settings });
 }
@@ -3435,3 +3587,4 @@ function openAiRule(index = -1) {
 $("#addAiRule").addEventListener("click", () => openAiRule());
 
 init();
+
