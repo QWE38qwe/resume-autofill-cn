@@ -111,6 +111,72 @@ test("calendar date arithmetic handles month and year boundaries", () => {
   assert.equal(core.offsetDay("2026-03-01", -1), "2026-02-28");
 });
 
+test("existing backups gain default settings without losing edited profile data", () => {
+  const data = seed();
+  delete data.settings;
+  data.personal.name = "虚构测试人物";
+  assert.equal(core.validState(data), true);
+  data.settings = core.normalizeSettings(data.settings, data.versions);
+  assert.equal(data.personal.name, "虚构测试人物");
+  assert.equal(data.settings.fill.defaultVersionId, data.versions[0].id);
+  assert.equal(data.settings.fill.overwriteExisting, false);
+  assert.equal(core.validState(data), true);
+});
+
+test("enabled preset answers participate in actual simulated filling", () => {
+  const data = seed();
+  assert.equal(core.fillValues(data, "v1").salary, undefined);
+  data.settings.fill.rules[0].enabled = true;
+  const values = core.fillValues(data, "v1");
+  assert.equal(values.salary, data.settings.fill.rules[0].answer);
+  assert.equal(core.planFill({salary:""}, values)[0].status, "filled");
+  data.settings.fill.rules[0].enabled = false;
+  assert.equal(core.planFill({salary:""}, core.fillValues(data, "v1"))[0].status, "manual");
+});
+
+test("settings validate types, port ranges and unique answer fields", () => {
+  for (const change of [
+    settings => { settings.mail.port = 0; },
+    settings => { settings.mail.port = 65536; },
+    settings => { settings.mail.intervalHours = 0; },
+    settings => { settings.mail.lookbackHours = 0; },
+    settings => { settings.mail.lastSync = {at:"invalid",added:1}; },
+    settings => { settings.ai.optionMatching = "true"; },
+    settings => { settings.ai.providers[0].enabled = "false"; },
+    settings => { settings.fill.animate = 1; },
+    settings => { settings.fill.rules[0].field = "unknown"; },
+    settings => { settings.fill.rules.push({...settings.fill.rules[0],id:"another-rule"}); },
+  ]) {
+    const data = seed();
+    change(data.settings);
+    assert.equal(core.validState(data), false);
+  }
+});
+
+test("normalizing imported settings drops credential fields and repairs missing version references", () => {
+  const data = seed();
+  data.settings.ai.providers[0].apiKey = "test-placeholder";
+  data.settings.mail.authCode = "test-placeholder";
+  data.settings.fill.defaultVersionId = "missing";
+  const settings = core.normalizeSettings(data.settings, data.versions);
+  assert.equal(Object.hasOwn(settings.ai.providers[0], "apiKey"), false);
+  assert.equal(Object.hasOwn(settings.mail, "authCode"), false);
+  assert.equal(settings.fill.defaultVersionId, data.versions[0].id);
+  assert.equal(core.validSettings(settings), true);
+});
+
+test("JSON backups round-trip settings and separate workspaces do not share settings", () => {
+  const first = seed();
+  first.settings.mail.port = 995;
+  first.settings.mail.autoSync = true;
+  first.settings.fill.overwriteExisting = true;
+  const restored = JSON.parse(JSON.stringify(first));
+  assert.equal(core.validState(restored), true);
+  assert.equal(restored.settings.mail.port, 995);
+  assert.equal(restored.settings.fill.overwriteExisting, true);
+  assert.equal(seed().settings.mail.port, 993);
+});
+
 test("CSV export escapes quotes, preserves selected rows and neutralizes formulas", () => {
   const data = seed();
   data.applications[0].company = '=HYPERLINK("https://example.com")';
