@@ -1163,3 +1163,50 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 #api .settings-actions { margin-top: 10px; }
 #api .sync-preferences { gap: 10px; }
 #api .install-command { font-size: 12px; }
+
+
+/* Full-field PDF import preview */
+.parsed-record-group {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.parsed-record-group > .record-title {
+  margin-bottom: 10px;
+  color: var(--ink);
+}
+.parsed-import-note,
+.parsed-import-summary {
+  margin: 10px 0;
+  color: var(--caption);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.parsed-import-summary {
+  padding: 9px 12px;
+  border-radius: 9px;
+  background: var(--surface-soft, #f6f7f5);
+}
+.parsed-overwrite {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  color: var(--ink);
+  font-size: 12px;
+}
+.parsed-overwrite input {
+  width: 15px;
+  height: 15px;
+}
+.parse-field-hint {
+  display: block;
+  margin-top: 3px;
+  color: var(--caption);
+  font-size: 11px;
+  font-weight: 400;
+}
+.import-privacy-note {
+  margin: 8px 0 0;
+  line-height: 1.5;
+}
