@@ -2287,13 +2287,49 @@ $("#parseResume").addEventListener("click", async () => {
     return;
   }
 
-  const providers = activeAiProviders();
   const button = $("#parseResume");
+  const extension = file.name.split(".").pop().toLowerCase();
   button.disabled = true;
   try {
     setParseStatus("正在本地读取简历文本…");
     const text = await extractResumeText(file);
-    if (text.trim().length < 30) throw new Error("没有读取到足够的简历文本，请确认文件不是扫描图片");
+    if (text.trim().length < 30) {
+      if (extension === "pdf") {
+        throw new Error("PDF 中没有提取到足够文本，可能是扫描图片版；当前暂不支持 OCR，请导出可复制文字的 PDF");
+      }
+      throw new Error("没有读取到足够的简历文本，请确认文件内容");
+    }
+
+    if (extension === "pdf") {
+      if (typeof parsePdfResumeText !== "function") throw new Error("PDF 简历解析模块未加载");
+      parsedDraft = parsePdfResumeText(text, file.name);
+      if (!parsedDraft.stats?.total) throw new Error("没有识别到可导入的简历字段，请确认 PDF 内容");
+      try {
+        parsedDraft.resumeFile = await serializeResumeFile(file);
+      } catch (error) {
+        parsedDraft.resumeFile = null;
+        parsedDraft.resumeFileWarning = error.message || "原 PDF 无法绑定为简历附件";
+      }
+      renderParsedDraft();
+      const stats = parsedDraft.stats;
+      const summary = [
+        "基本信息 " + stats.personalFields,
+        "教育 " + stats.education,
+        "工作 " + stats.internships,
+        "项目 " + stats.projects,
+        "奖项 " + stats.awards,
+        "证书 " + stats.certificates,
+        "家庭成员 " + stats.family
+      ].join(" · ");
+      setParseStatus(
+        "PDF 本地解析完成：" + summary +
+        (parsedDraft.resumeFileWarning ? "；" + parsedDraft.resumeFileWarning : ""),
+        "success"
+      );
+      return;
+    }
+
+    const providers = activeAiProviders();
     const localDraft = parseResumeLocally(text, file.name);
     const localWorks = splitInternshipsIfMerged(localDraft.internships, text);
     // Structured resumes (clear 实习经历 headers) should trust local split first —
@@ -2306,15 +2342,18 @@ $("#parseResume").addEventListener("click", async () => {
         education: null,
         parseSource: "local"
       };
-      setParseStatus(`已按「实习经历」识别 ${localWorks.length} 段：${localWorks.map(item => item.company || item.position || "?").join(" / ")}`, "success");
+      setParseStatus("已按「实习经历」识别 " + localWorks.length + " 段：" +
+        localWorks.map(item => item.company || item.position || "?").join(" / "), "success");
     } else if (providers.length) {
       const permitted = await ensureProviderPermissions(providers);
       if (permitted) {
-        setParseStatus(`已读取 ${text.length.toLocaleString()} 个字符，正在提取关键信息…`);
+        setParseStatus("已读取 " + text.length.toLocaleString() + " 个字符，正在提取关键信息…");
         try {
           const aiDraft = await parseInternships(text, file.name, providers);
           const aiWorks = splitInternshipsIfMerged(aiDraft.internships || [], text)
-            .filter(work => !/学术|论文|助理/.test(`${work.company}${work.position}${work.description}`));
+            .filter(work => !/学术|论文|助理/.test(
+              `${work.company}${work.position}${work.description}`
+            ));
           parsedDraft = {
             ...aiDraft,
             internships: aiWorks.length >= localWorks.length ? aiWorks : localWorks,
@@ -2365,7 +2404,10 @@ $("#parseResume").addEventListener("click", async () => {
       .filter(Boolean)
       .join(" / ");
     setParseStatus(
-      `解析完成：识别到 ${parsedDraft.internships.length} 段实习经历${parsedDraft.parseSource === "local" ? "（本地解析）" : ""}${companyPreview ? `：${companyPreview}` : ""}${parsedDraft.resumeFileWarning ? `；${parsedDraft.resumeFileWarning}` : ""}`,
+      "解析完成：识别到 " + parsedDraft.internships.length + " 段实习经历" +
+      (parsedDraft.parseSource === "local" ? "（本地解析）" : "") +
+      (companyPreview ? "：" + companyPreview : "") +
+      (parsedDraft.resumeFileWarning ? "；" + parsedDraft.resumeFileWarning : ""),
       parsedDraft.resumeFileWarning ? "" : "success"
     );
   } catch (error) {
@@ -2426,27 +2468,37 @@ async function extractPdfText(buffer) {
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = await pdf.getPage(pageNumber);
     const content = await page.getTextContent();
-    const lines = [];
-    let line = "";
-    let previousY = null;
-    for (const item of content.items) {
-      const value = item.str?.trim();
-      if (!value) continue;
-      const y = item.transform?.[5];
-      if (previousY !== null && y !== undefined && Math.abs(y - previousY) > 2.5) {
-        if (line) lines.push(line);
-        line = "";
-      }
-      line = appendTextPart(line, value);
-      previousY = y;
-      if (item.hasEOL) {
-        if (line) lines.push(line);
-        line = "";
-        previousY = null;
+    const positioned = content.items
+      .filter(item => item.str?.trim() && item.transform)
+      .map(item => ({
+        text: item.str.trim(),
+        x: Number(item.transform[4]) || 0,
+        y: Number(item.transform[5]) || 0,
+        width: Number(item.width) || 0
+      }))
+      .sort((left, right) => right.y - left.y || left.x - right.x);
+    const rows = [];
+    for (const item of positioned) {
+      const row = rows[rows.length - 1];
+      if (!row || Math.abs(row.y - item.y) > 2.5) {
+        rows.push({ y: item.y, items: [item] });
+      } else {
+        row.items.push(item);
       }
     }
-    if (line) lines.push(line);
-    pages.push(lines.join("\n"));
+    const pageLines = rows.map(row => {
+      row.items.sort((left, right) => left.x - right.x);
+      let line = "";
+      let previousRight = null;
+      for (const item of row.items) {
+        const gap = previousRight === null ? 0 : item.x - previousRight;
+        if (line && gap > 4 && !/\s$/.test(line)) line += " ";
+        line = appendTextPart(line, item.text);
+        previousRight = item.x + item.width;
+      }
+      return line.trim();
+    }).filter(Boolean);
+    pages.push(pageLines.join("\n"));
   }
   return pages.join("\n\n");
 }
@@ -2939,7 +2991,99 @@ function normalizeInternship(work) {
   };
 }
 
+
+function renderPdfRecordGroup(title, type, records, fields) {
+  const list = Array.isArray(records) ? records : [];
+  if (!list.length) return "";
+  const cards = list.map((record, index) => {
+    const visibleFields = fields.filter(([key]) => String(record[key] ?? "").trim());
+    const inputs = visibleFields.map(([key, label]) => {
+      const value = String(record[key] ?? "");
+      const longField = ["description", "content", "duty", "result"].includes(key);
+      const field = longField
+        ? '<textarea data-pdf-record-field="' + type + '" data-pdf-index="' + index + '" data-pdf-key="' + key + '" rows="4">' + safe(value) + '</textarea>'
+        : '<input data-pdf-record-field="' + type + '" data-pdf-index="' + index + '" data-pdf-key="' + key + '" value="' + safeAttr(value) + '">';
+      return '<div class="field"><label>' + safe(label) + '</label>' + field + '</div>';
+    }).join("");
+    return '<div class="parsed-work" data-pdf-record-card="' + type + '" data-pdf-index="' + index + '">' +
+      '<div class="record-title"><strong>' + safe(title) + ' ' + (index + 1) + '</strong>' +
+      '<button class="btn ghost small danger-btn" type="button" data-remove-pdf-record="' + type + '" data-index="' + index + '">移除</button></div>' +
+      '<div class="modal-grid">' + inputs + '</div></div>';
+  }).join("");
+  return '<section class="parsed-record-group"><div class="record-title"><strong>' +
+    safe(title) + ' · ' + list.length + '</strong></div>' + cards + '</section>';
+}
+
+function renderPdfParsedDraft() {
+  const basics = basicFields.filter(([key]) => String(parsedDraft.personal?.[key] ?? "").trim());
+  const basicMarkup = basics.map(([key, label]) => {
+    const hint = parsedDraft.fieldHints?.[key];
+    const existingValue = String(db.personal?.[key] || "").trim();
+    const conflictHint = existingValue && existingValue !== String(parsedDraft.personal[key] || "").trim()
+      ? "资料库已有值，默认保留；勾选覆盖可替换"
+      : "";
+    const fieldHint = [hint, conflictHint].filter(Boolean).join("；");
+    return '<div class="field"><label>' + safe(label) +
+      (fieldHint ? '<small class="parse-field-hint">' + safe(fieldHint) + '</small>' : '') +
+      '</label><input data-pdf-basic="' + key + '" value="' +
+      safeAttr(parsedDraft.personal[key]) + '"></div>';
+  }).join("");
+  const workFields = [
+    ["company", "公司"], ["department", "部门"], ["position", "职位"], ["type", "类型"],
+    ["city", "城市"], ["start", "开始时间"], ["end", "结束时间"], ["description", "工作内容"]
+  ];
+  const summaryMarkup = parsedDraft.summary
+    ? '<section class="parsed-record-group"><div class="record-title"><strong>自我描述</strong></div>' +
+      '<div class="parsed-work"><textarea data-pdf-summary rows="5">' + safe(parsedDraft.summary) + '</textarea></div></section>'
+    : "";
+  const recordMarkup = [
+    renderPdfRecordGroup("教育经历", "education", parsedDraft.education, schemas.education),
+    renderPdfRecordGroup("工作经历", "internships", parsedDraft.internships, workFields),
+    renderPdfRecordGroup("项目经历", "projects", parsedDraft.projects, schemas.projects),
+    renderPdfRecordGroup("获奖情况", "awards", parsedDraft.awards, schemas.awards),
+    renderPdfRecordGroup("语言能力", "languages", parsedDraft.languages, schemas.languages),
+    renderPdfRecordGroup("证书信息", "certificates", parsedDraft.certificates, schemas.certificates),
+    renderPdfRecordGroup("家庭成员", "family", parsedDraft.family, schemas.family)
+  ].join("");
+  const stats = parsedDraft.stats || {};
+  const hasWorkVersion = Boolean(parsedDraft.internships?.length);
+  const versionNameMarkup = hasWorkVersion
+    ? '<div class="field"><label>新简历版本名称</label><input id="parsedVersionName" value="' + safeAttr(parsedDraft.versionName) + '"></div>'
+    : "";
+  const actionLabel = hasWorkVersion ? "确认导入并创建简历版本" : "确认并导入资料库";
+  $("#parseResult").innerHTML =
+    '<div class="parse-preview">' +
+      '<div class="parse-preview-head">' +
+        versionNameMarkup +
+        '<button class="btn primary" id="applyParsedPdf">' + actionLabel + '</button>' +
+      '</div>' +
+      '<p class="parsed-import-note">PDF 使用本地规则解析，不会发送给 AI。身份证号、联系方式和家庭信息请逐项核对；已有基本信息默认保留，经历记录按去重方式追加。</p>' +
+      '<div class="parsed-import-summary">识别到 ' + (stats.total || 0) + ' 项信息；基本信息 ' + (stats.personalFields || 0) +
+        ' · 教育 ' + (stats.education || 0) + ' · 工作 ' + (stats.internships || 0) +
+        ' · 项目 ' + (stats.projects || 0) + ' · 奖项 ' + (stats.awards || 0) +
+        ' · 证书 ' + (stats.certificates || 0) + ' · 家庭成员 ' + (stats.family || 0) + '</div>' +
+      (basics.length ? '<section class="parsed-record-group"><div class="record-title"><strong>基本信息 · ' + basics.length + '</strong></div><div class="parsed-basics">' + basicMarkup + '</div></section>' : '') +
+      recordMarkup + summaryMarkup +
+      '<label class="parsed-overwrite"><input type="checkbox" id="parsedOverwriteExisting"> 覆盖资料库中已有的非空基本信息字段</label>' +
+      (parsedDraft.resumeFileWarning ? '<p class="parse-field-hint">' + safe(parsedDraft.resumeFileWarning) + '</p>' : '') +
+    '</div>';
+  $("#applyParsedPdf").onclick = applyPdfResumeImport;
+  $$("#parseResult [data-remove-pdf-record]").forEach(button => {
+    button.onclick = () => {
+      readPdfParsedDraft();
+      const type = button.dataset.removePdfRecord;
+      const index = Number(button.dataset.index);
+      if (Array.isArray(parsedDraft[type])) parsedDraft[type].splice(index, 1);
+      renderParsedDraft();
+    };
+  });
+}
+
 function renderParsedDraft() {
+  if (parsedDraft?.parseSource === "pdf-local") {
+    renderPdfParsedDraft();
+    return;
+  }
   $("#parseResult").innerHTML = `
     <div class="parse-preview">
       <div class="parse-preview-head">
@@ -2991,6 +3135,142 @@ function readParsedWorkCards() {
     record.description = record.bullets.map(item => `• ${item}`).join("\n");
     return record;
   });
+}
+
+
+function readPdfParsedDraft() {
+  if (!parsedDraft || parsedDraft.parseSource !== "pdf-local") return;
+  parsedDraft.personal = parsedDraft.personal || {};
+  $$("#parseResult [data-pdf-basic]").forEach(input => {
+    parsedDraft.personal[input.dataset.pdfBasic] = input.value.trim();
+  });
+  $$("#parseResult [data-pdf-record-field]").forEach(input => {
+    const type = input.dataset.pdfRecordField;
+    const index = Number(input.dataset.pdfIndex);
+    const key = input.dataset.pdfKey;
+    const record = parsedDraft[type]?.[index];
+    if (record && key) record[key] = input.value.trim();
+  });
+  if (Array.isArray(parsedDraft.internships)) {
+    parsedDraft.internships.forEach(work => {
+      work.bullets = splitBulletLines(work.description);
+    });
+  }
+  const summary = $("#parseResult [data-pdf-summary]");
+  if (summary) parsedDraft.summary = summary.value.trim();
+  const versionName = $("#parsedVersionName");
+  if (versionName) parsedDraft.versionName = versionName.value.trim();
+}
+
+async function applyPdfResumeImport() {
+  if (!parsedDraft || parsedDraft.parseSource !== "pdf-local") return;
+  readPdfParsedDraft();
+  const overwrite = Boolean($("#parsedOverwriteExisting")?.checked);
+  const personalValues = Object.values(parsedDraft.personal || {}).filter(value => String(value || "").trim()).length;
+  const recordValues = ["education", "internships", "projects", "awards", "languages", "certificates", "family"]
+    .reduce((total, key) => total + (parsedDraft[key]?.length || 0), 0);
+  if (!personalValues && !recordValues && !parsedDraft.summary) {
+    setParseStatus("没有可导入的字段，请检查解析结果", "error");
+    return;
+  }
+
+  const previous = {
+    personal: { ...(db.personal || {}) },
+    education: [...(db.education || [])],
+    projects: [...(db.projects || [])],
+    awards: [...(db.awards || [])],
+    languages: [...(db.languages || [])],
+    certificates: [...(db.certificates || [])],
+    family: [...(db.family || [])],
+    profiles: [...(db.profiles || [])],
+    activeProfileId: db.activeProfileId
+  };
+  let createdProfile = null;
+  try {
+    await downloadMigrationBackup("简填PDF导入前回滚");
+    db.personal = mergePersonalFields(db.personal, parsedDraft.personal, overwrite);
+    if (!parsedDraft.internships?.length && parsedDraft.summary && (overwrite || !String(db.personal.specialty || "").trim())) db.personal.specialty = parsedDraft.summary;
+    db.education = appendUniqueRecords(db.education, parsedDraft.education, item =>
+      (item.school || "") + "|" + (item.major || "") + "|" + (item.level || "") + "|" + (item.start || "")
+    );
+    db.projects = appendUniqueRecords(db.projects, parsedDraft.projects, item =>
+      (item.name || "") + "|" + (item.start || "") + "|" + String(item.content || "").slice(0, 40)
+    );
+    db.awards = appendUniqueRecords(db.awards, parsedDraft.awards, item =>
+      (item.name || "") + "|" + (item.date || "")
+    );
+    db.languages = appendUniqueRecords(db.languages, parsedDraft.languages, item =>
+      (item.language || "") + "|" + (item.proficiency || "")
+    );
+    db.certificates = appendUniqueRecords(db.certificates, parsedDraft.certificates, item =>
+      (item.name || "") + "|" + (item.date || "")
+    );
+    db.family = appendUniqueRecords(db.family, parsedDraft.family, item =>
+      (item.name || "") + "|" + (item.relation || "")
+    );
+
+    if (parsedDraft.internships?.length) {
+      const works = parsedDraft.internships.map(work => ({
+        company: work.company || "",
+        department: work.department || "",
+        position: work.position || "",
+        type: work.type || "实习",
+        city: work.city || "",
+        start: work.start || "",
+        end: work.end || "",
+        description: work.description || ""
+      }));
+      createdProfile = {
+        id: crypto.randomUUID(),
+        name: parsedDraft.versionName || "PDF导入版本",
+        target: "",
+        summary: parsedDraft.summary || "",
+        attachment: parsedDraft.attachment || "",
+        resumePath: parsedDraft.resumeFile?.name || "",
+        resumeFile: parsedDraft.resumeFile || null,
+        work: works,
+        openQuestions: []
+      };
+      db.profiles = db.profiles || [];
+      db.profiles.push(createdProfile);
+      db.activeProfileId = createdProfile.id;
+    }
+
+    await chrome.storage.local.set({
+      personal: db.personal,
+      education: db.education,
+      projects: db.projects,
+      awards: db.awards,
+      languages: db.languages,
+      certificates: db.certificates,
+      family: db.family,
+      profiles: db.profiles,
+      activeProfileId: db.activeProfileId
+    });
+  } catch (error) {
+    Object.assign(db, previous);
+    setParseStatus("PDF 导入失败：" + (error.message || error), "error");
+    return;
+  }
+
+  renderBasic();
+  ["education", "projects", "awards", "languages", "certificates", "family"].forEach(type => renderList(type));
+  renderVersions();
+  $("#importPanel").classList.add("hidden");
+  parsedDraft = null;
+  $("#parseResult").innerHTML = "";
+  $("#resumeFile").value = "";
+  $("#fileName").textContent = "选择 PDF、DOCX、TXT 或 Markdown 简历";
+  setParseStatus("");
+  if (createdProfile) {
+    openedVersionId = createdProfile.id;
+    openVersion(createdProfile.id);
+    renderVersions();
+    $("#versionEditor").scrollIntoView({ behavior: "smooth", block: "start" });
+  } else {
+    activateTab("profile");
+  }
+  toast("PDF 简历已导入资料库" + (createdProfile ? "，并创建了新简历版本" : ""), "success");
 }
 
 function readParsedBasics() {
@@ -3068,12 +3348,12 @@ function setMdImportStatus(message, state = "") {
   node.className = `parse-status ${state}`.trim();
 }
 
-function mergePersonalFields(target, source = {}) {
+function mergePersonalFields(target, source = {}, overwrite = false) {
   const next = { ...(target || {}) };
   Object.entries(source || {}).forEach(([key, value]) => {
     const text = String(value || "").trim();
     if (!text) return;
-    if (!String(next[key] || "").trim()) next[key] = text;
+    if (overwrite || !String(next[key] || "").trim()) next[key] = text;
   });
   return next;
 }

@@ -174,6 +174,7 @@
       <button class="btn primary" id="parseResume">读取并解析</button>
     </div>
     <div class="parse-status" id="parseStatus" aria-live="polite"></div>
+    <p class="muted import-privacy-note">PDF 全字段解析在本机完成；扫描图片版 PDF 暂不支持 OCR。导入前可逐项核对，默认不覆盖已有资料。</p>
     <div id="parseResult"></div>
   </div>
 </section>
@@ -271,6 +272,7 @@
   <script src="vendor/fflate.min.js"></script>
   <script src="scripts/readme-demo.js"></script>
   <script src="scripts/md-resume-parse.js"></script>
+  <script src="scripts/pdf-resume-parse.js"></script>
   <script src="manager.js"></script>
 </body>
 </html>
